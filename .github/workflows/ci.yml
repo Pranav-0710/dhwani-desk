@@ -1,0 +1,171 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  GITLEAKS_VERSION: 8.21.2
+
+jobs:
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP" gitleaks
+
+      - name: Scan full history
+        run: |
+          "$RUNNER_TEMP/gitleaks" git --redact --verbose --exit-code 1 .
+
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for backend project
+        id: check
+        working-directory: .
+        run: |
+          if [ -f backend/pyproject.toml ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "No backend/pyproject.toml yet — skipping backend checks."
+          fi
+
+      - name: Set up uv
+        if: steps.check.outputs.exists == 'true'
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install dependencies
+        if: steps.check.outputs.exists == 'true'
+        run: uv sync --locked --all-extras --dev
+
+      - name: Lint
+        if: steps.check.outputs.exists == 'true'
+        run: uv run ruff check .
+
+      - name: Format check
+        if: steps.check.outputs.exists == 'true'
+        run: uv run ruff format --check .
+
+      - name: Test
+        if: steps.check.outputs.exists == 'true'
+        run: uv run pytest -q
+
+  console:
+    name: Console
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for console project
+        id: check
+        working-directory: .
+        run: |
+          if [ -f console/package.json ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "No console/package.json yet — skipping console checks."
+          fi
+
+      - name: Set up Node.js
+        if: steps.check.outputs.exists == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: console/package-lock.json
+
+      - name: Install dependencies
+        if: steps.check.outputs.exists == 'true'
+        run: npm ci
+
+      - name: Lint
+        if: steps.check.outputs.exists == 'true'
+        run: npm run lint
+
+      - name: Type check
+        if: steps.check.outputs.exists == 'true'
+        run: npm run typecheck
+
+      - name: Test
+        if: steps.check.outputs.exists == 'true'
+        run: npm test
+
+      - name: Build
+        if: steps.check.outputs.exists == 'true'
+        run: npm run build
+
+  notebooks:
+    name: Notebooks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check notebooks are stripped
+        shell: python
+        run: |
+          import json, subprocess, sys
+
+          paths = subprocess.run(
+              ["git", "ls-files", "*.ipynb"], capture_output=True, text=True, check=True
+          ).stdout.split()
+          if not paths:
+              print("No notebooks in the repo — nothing to check.")
+              sys.exit(0)
+
+          bad = []
+          for path in paths:
+              with open(path, encoding="utf-8") as f:
+                  nb = json.load(f)
+              for i, cell in enumerate(nb.get("cells", [])):
+                  if cell.get("cell_type") != "code":
+                      continue
+                  if cell.get("outputs") or cell.get("execution_count") is not None:
+                      bad.append(f"{path}: cell {i} has outputs or an execution count")
+              if "widgets" in nb.get("metadata", {}):
+                  bad.append(f"{path}: notebook metadata contains widget state")
+
+          for line in bad:
+              print(f"::error::{line}")
+          if bad:
+              print("Strip notebooks before committing: pipx run nbstripout training/*.ipynb")
+              sys.exit(1)
+          print(f"{len(paths)} notebook(s) clean.")

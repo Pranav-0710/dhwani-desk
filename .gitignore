@@ -1,0 +1,48 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+console/dist/
+*.tsbuildinfo
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Models, audio and generated data (stored on Hugging Face Hub, never in git)
+models/
+checkpoints/
+*.onnx
+*.safetensors
+*.bin
+*.pt
+*.wav
+*.mp3
+*.flac
+data/generated/
+eval/runs/
+
+# Local databases
+*.db
+*.sqlite3
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

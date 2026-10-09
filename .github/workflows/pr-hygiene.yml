@@ -1,0 +1,61 @@
+name: PR hygiene
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-hygiene-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  hygiene:
+    name: PR hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if ! printf '%s' "$TITLE" | grep -Eq '^(feat|fix|chore|docs|refactor|test): [^ ].*$'; then
+            echo "::error::PR title must be 'type: short description' (types: feat, fix, chore, docs, refactor, test). Got: $TITLE"
+            exit 1
+          fi
+          if [ "${#TITLE}" -gt 72 ]; then
+            echo "::error::PR title is ${#TITLE} characters; keep it under 72 (it becomes the squash commit message)."
+            exit 1
+          fi
+
+      - name: Check linked issue
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if ! printf '%s' "$BODY" | grep -Eiq '(close[sd]?|fix(e[sd])?|resolve[sd]?) #[0-9]+'; then
+            echo "::error::PR body must link its issue with 'Closes #<number>'."
+            exit 1
+          fi
+
+      - name: Check for co-author trailers
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if git log --format=%B "$BASE_SHA..$HEAD_SHA" | grep -Eiq '^[[:space:]]*co-authored-by:'; then
+            echo "::error::A commit in this PR has a Co-authored-by trailer. Reword the commit to remove it."
+            exit 1
+          fi
+          if printf '%s' "$BODY" | grep -Eiq '^[[:space:]]*co-authored-by:'; then
+            echo "::error::Remove the Co-authored-by line from the PR description (it would land in the squash commit)."
+            exit 1
+          fi
