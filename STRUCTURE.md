@@ -94,3 +94,24 @@ Settings → Rules → Rulesets → New branch ruleset, target `main`:
 | Notebooks | Every committed `.ipynb` has no outputs or execution counts |
 
 `backend/pyproject.toml` must list `ruff` and `pytest` as dev dependencies. `console/package.json` must define `lint`, `typecheck`, `test` (non-watch) and `build` scripts.
+
+## Hugging Face Hub
+
+Datasets and checkpoints never go in git. They live in private repos under the Hugging Face organization **Dhwanidesk**:
+
+| Repo | Type | Holds | Written by | Read by |
+| --- | --- | --- | --- | --- |
+| `Dhwanidesk/dhwani-desk-data` | dataset | generated training set: `train.jsonl`, `rejected.jsonl`, `report.json`, dataset card | `training/02_generate_data.ipynb` (#7, #12) | fine-tuning notebook (#14) |
+| `Dhwanidesk/dhwani-desk-laya` | model | fine-tuned Laya checkpoints | fine-tuning notebook (#14) | backend, at `LAYA_CHECKPOINT_REVISION` (#15) |
+
+Every version used for training or serving gets a tag (for example `data-v1`, `laya-v1`), and the backend pins a tag or commit, never `main`.
+
+**Tokens**
+- Kaggle / Colab: a **write** token stored as the notebook secret `HF_TOKEN` (Kaggle: Add-ons → Secrets; Colab: the key icon). Never in a cell.
+- Laptop: a **read** token in `.env` as `HF_TOKEN`. A fine-grained token limited to the Dhwanidesk repos is best.
+- Never commit a token, print it, or paste it into chat, issues or PRs.
+
+**Access**
+- Members of the Dhwanidesk organization see the private repos. Jey Pranav is admin. Invite Lakshmi Narasimman (role: write) when they rejoin: organization page → Settings → Members.
+- The repos stay private. The upload code refuses to push to a repo that is public.
+
