@@ -5,6 +5,8 @@ from typing import Literal
 from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from gnani.timbre import DEFAULT_VOICE, SAMPLE_RATES
+
 BACKEND_DIR = Path(__file__).resolve().parent
 REPO_ROOT = BACKEND_DIR.parent
 
@@ -26,19 +28,19 @@ class Settings(BaseSettings):
 
     gnani_tts_url: str = "https://api.vachana.ai/api/v1/tts"
     gnani_tts_lang: str = "kn-IN"
-    gnani_tts_voice: str = "Kavin"
+    gnani_tts_voice: str = DEFAULT_VOICE
     gnani_tts_sample_rate: int = 16000
     gnani_tts_speed: float = 1.0
 
     @field_validator("gnani_tts_voice", mode="before")
     @classmethod
     def _default_voice_when_blank(cls, value: object) -> object:
-        return "Kavin" if value in ("", None) else value
+        return DEFAULT_VOICE if value in ("", None) else value
 
     @field_validator("gnani_tts_sample_rate")
     @classmethod
     def _tts_rate(cls, value: int) -> int:
-        if value not in (8000, 16000, 22050, 24000, 44100, 48000):
+        if value not in SAMPLE_RATES:
             raise ValueError("GNANI_TTS_SAMPLE_RATE must be a Timbre-supported rate")
         return value
 

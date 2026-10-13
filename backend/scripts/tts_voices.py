@@ -10,13 +10,14 @@ the first streamed audio chunk and the total synthesis time. Reads GNANI_API_KEY
 
 import argparse
 import asyncio
+import contextlib
 import sys
 import time
 import wave
 from pathlib import Path
 
 from config import REPO_ROOT, get_settings
-from gnani.timbre import TimbreClient, TimbreConfig, TimbreError
+from gnani.timbre import SAMPLE_RATES, TimbreClient, TimbreConfig, TimbreError
 
 # Kavin and Saanvi are Timbre's native Kannada voices; the rest are other-language voices
 # speaking Kannada, for comparison.
@@ -46,10 +47,11 @@ async def render(client: TimbreClient, voice: str, text: str) -> tuple[bytes, fl
     started = time.monotonic()
     first_chunk_s = 0.0
     chunks: list[bytes] = []
-    async for chunk in client.stream(text, voice=voice):
-        if not chunks:
-            first_chunk_s = time.monotonic() - started
-        chunks.append(chunk)
+    async with contextlib.aclosing(client.stream(text, voice=voice)) as stream:
+        async for chunk in stream:
+            if not chunks:
+                first_chunk_s = time.monotonic() - started
+            chunks.append(chunk)
     return b"".join(chunks), first_chunk_s, time.monotonic() - started
 
 
@@ -63,6 +65,7 @@ async def run(voices: list[str], rate: int, out_dir: Path) -> None:
         base_url=settings.gnani_tts_url,
         language=settings.gnani_tts_lang,
         sample_rate=rate,
+        speed=settings.gnani_tts_speed,
     )
     async with TimbreClient(config) as client:
         for voice in voices:
@@ -84,7 +87,7 @@ async def run(voices: list[str], rate: int, out_dir: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--voices", nargs="+", default=DEFAULT_VOICES)
-    parser.add_argument("--rate", type=int, default=16000)
+    parser.add_argument("--rate", type=int, default=16000, choices=sorted(SAMPLE_RATES))
     parser.add_argument("--out", type=Path, default=REPO_ROOT / "samples" / "tts")
     args = parser.parse_args()
     asyncio.run(run(args.voices, args.rate, args.out))

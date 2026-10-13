@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import contextlib
 import json
 
 import httpx2
@@ -163,3 +164,90 @@ def test_settings_reject_speed_outside_timbre_range(monkeypatch: pytest.MonkeyPa
 
     with pytest.raises(ValueError):
         Settings(_env_file=None)
+
+
+async def collect_stream(client: TimbreClient) -> list[bytes]:
+    return [chunk async for chunk in client.stream("x")]
+
+
+def test_stream_that_ends_without_final_event_raises() -> None:
+    body = sse(("start", {"status": "streaming_started"}), ("chunk", chunk(0, b"AAAA")))
+
+    with pytest.raises(TimbreError) as caught:
+        run_with(lambda request: httpx2.Response(200, content=body), collect_stream)
+
+    assert caught.value.error_type == "INCOMPLETE_STREAM"
+
+
+def test_malformed_audio_events_raise_protocol_error() -> None:
+    not_json = b"event: chunk\ndata: not json\n\n"
+    bad_base64 = sse(("chunk", {"chunk_index": 0, "audio": "@@@", "is_final": False}))
+
+    for body in (not_json, bad_base64):
+        with pytest.raises(TimbreError) as caught:
+            run_with(lambda request, body=body: httpx2.Response(200, content=body), collect_stream)
+        assert caught.value.error_type == "PROTOCOL_ERROR"
+
+
+def test_flat_error_event_keeps_its_message() -> None:
+    body = sse(("error", {"type": "API_ERROR", "message": "engine down"}))
+
+    with pytest.raises(TimbreError, match="engine down"):
+        run_with(lambda request: httpx2.Response(200, content=body), collect_stream)
+
+
+def test_timeout_becomes_timeout_error() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ReadTimeout("slow", request=request)
+
+    with pytest.raises(TimbreError) as caught:
+        run_with(handler, collect_stream)
+
+    assert caught.value.error_type == "TIMEOUT"
+
+
+def test_stream_keeps_samples_whole_across_odd_chunks() -> None:
+    body = sse(
+        ("chunk", chunk(0, b"ABC")),
+        ("chunk", chunk(1, b"DE")),
+        (
+            "complete",
+            {"chunk_index": 2, "audio": base64.b64encode(b"F").decode(), "is_final": True},
+        ),
+    )
+
+    chunks = run_with(lambda request: httpx2.Response(200, content=body), collect_stream)
+
+    assert chunks == [b"AB", b"CD", b"EF"]
+    assert all(len(c) % 2 == 0 for c in chunks)
+
+
+def test_closing_the_stream_early_closes_the_http_response() -> None:
+    closed = asyncio.Event()
+
+    class EndlessSse(httpx2.AsyncByteStream):
+        async def __aiter__(self):
+            yield sse(("chunk", chunk(0, b"AAAA")))
+            await asyncio.sleep(3600)
+
+        async def aclose(self) -> None:
+            closed.set()
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, stream=EndlessSse())
+
+    async def barge_in(client: TimbreClient) -> bool:
+        async with contextlib.aclosing(client.stream("x")) as chunks:
+            async for _ in chunks:
+                break  # the caller started talking
+        await asyncio.wait_for(closed.wait(), timeout=1)
+        return closed.is_set()
+
+    assert run_with(handler, barge_in)
+
+
+def test_empty_text_and_missing_key_are_rejected_locally() -> None:
+    with pytest.raises(ValueError):
+        TimbreConfig(api_key="k").request_body("   ")
+    with pytest.raises(ValueError):
+        TimbreClient(TimbreConfig(api_key=""))
