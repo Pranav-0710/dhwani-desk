@@ -184,3 +184,38 @@ def test_style_examples_never_show_a_ward_or_id_the_spec_does_not_have() -> None
             assert not gd.wards_mentioned(examples), spec["id"]
         if not spec["personal_id"]:
             assert not gd.LONG_NUMBER.search(examples), spec["id"]
+
+
+def test_inflection_matching_does_not_reach_other_words() -> None:
+    text = "ಇನ್ನೂ ಬಂದಿಲ್ಲ ಸರ್ ಬೇಗ ಕಳಿಸಿ"
+    # ನೀರಿನ ಟ್ಯಾಂಕ್ (w09's water tank) is not ನೀರಿನ ಟ್ಯಾಂಕರ್ (a water tanker).
+    assert gd.wards_mentioned("ನೀರಿನ ಟ್ಯಾಂಕರ್ " + text) == set()
+    assert gd.wards_mentioned("ನೀರಿನ ಟ್ಯಾಂಕು ತುಂಬಿ ಹರೀತಿದೆ") == {"w09"}
+    w09 = spec_for("w09", "landmark", "ನೀರಿನ ಟ್ಯಾಂಕ್")
+    assert "ward_missing" in gd.problems("ನೀರಿನ ಟ್ಯಾಂಕರ್ " + text, w09)
+    # ಚರ್ಚ್ (w06's church) is not ಚರ್ಚೆ ("discussion").
+    assert gd.wards_mentioned("ಮೀಟಿಂಗ್ ಅಲ್ಲಿ ಚರ್ಚೆ ಮಾಡಿದ್ವಿ") == set()
+    assert gd.wards_mentioned("ಚರ್ಚ್ನಲ್ಲಿ") == {"w06"}
+
+
+def test_ward_rows_need_the_asked_for_phrase() -> None:
+    text = "ನೀರು ಬಂದಿಲ್ಲ ಮೂರು ದಿನ ಆಯ್ತು"
+    by_name = spec_for("w04", "name", "ಗಾಂಧಿನಗರ")
+    assert "ward_missing" in gd.problems("ಗಾಂಧಿ ಪ್ರತಿಮೆ ಹತ್ತಿರ " + text, by_name)
+    by_number = spec_for("w04", "number", "ವಾರ್ಡ್ 4")
+    assert gd.problems("4ನೇ ವಾರ್ಡ್ ಅಲ್ಲಿ " + text, by_number) == []
+
+
+def test_ward_numbers_in_ordinal_and_kannada_forms() -> None:
+    assert gd.wards_mentioned("ಆಲದಮರಹಳ್ಳಿ 6ನೇ ವಾರ್ಡ್") == {"w05", "w06"}
+    assert gd.wards_mentioned("6 ನೇ ವಾರ್ಡ್ ಅಲ್ಲಿ") == {"w06"}
+    assert gd.wards_mentioned("ಆರನೇ ವಾರ್ಡ್ ಅಲ್ಲಿ") == {"w06"}
+    assert gd.wards_mentioned("ವಾರ್ಡ್ ಎರಡು ಅಲ್ಲಿ") == {"w02"}
+    assert gd.wards_mentioned("ಮೂರನೇ ಸಲ ಕಾಲ್ ಮಾಡ್ತಿದೀನಿ") == set()
+
+
+def test_only_street_phrases_count_as_a_location() -> None:
+    text = "ನಾಯಿಗಳು ಮಕ್ಕಳನ್ನ ಅಟ್ಟಿಸ್ಕೊಂಡು ಬರ್ತವೆ"
+    assert gd.problems("ರೋಡ್ ಕ್ರಾಸ್ ಮಾಡೋಕೆ ಭಯ " + text, spec_for()) == []
+    for street in ("ಸೆಕೆಂಡ್ ಕ್ರಾಸ್", "3ನೇ ಕ್ರಾಸ್", "ಥರ್ಡ್ ಮೇನ್", "ಮೇನ್ ರೋಡ್ ಅಲ್ಲಿ"):
+        assert "place_mentioned_but_none" in gd.problems(f"{street} {text}", spec_for()), street

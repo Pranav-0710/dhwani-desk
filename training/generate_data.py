@@ -60,11 +60,13 @@ MAX_NEW_TOKENS = 512  # Kannada costs several tokens per word; the reply also ca
 LATIN = re.compile(r"[A-Za-z]")
 LONG_NUMBER = re.compile(r"\d(?:[\d ]{8,})\d")
 # Allowed in a transcript: the Kannada block, zero-width (non-)joiners, ASCII digits, spaces.
-NOT_KANNADA = re.compile(r"[^ಀ-೿‌‍0-9\s]")
-PUNCTUATION = re.compile(r"[.,!?;:\"'“”‘’।()\[\]-]+")
-VIRAMA = "್"
-# Street-level words: a row labelled "no location" must not contain them.
-STREET_WORDS = [place["kn"] for place in TEMPLATES["generic_places"]] + ["ಕ್ರಾಸ್", "ಮೇನ್ ರೋಡ್"]
+NOT_KANNADA = re.compile(r"[^\u0c80-\u0cff\u200c\u200d0-9\s]")
+PUNCTUATION = re.compile(r"[.,!?;:\"'\u201c\u201d\u2018\u2019\u0964()\[\]-]+")
+ZERO_WIDTH = re.compile(r"[\u200c\u200d]")
+VIRAMA = "\u0ccd"
+# Vowel signs Kannada adds when an English loanword ending in a consonant takes a suffix
+# (ಚರ್ಚ್ → ಚರ್ಚಿನ, ಟ್ಯಾಂಕ್ → ಟ್ಯಾಂಕು). Any other sign makes another word (ಚರ್ಚೆ, "discussion").
+LOANWORD_VOWELS = "\u0cbf\u0cc1"
 
 
 # --- specs -------------------------------------------------------------------------------
@@ -232,17 +234,20 @@ def parse_reply(reply: str) -> dict[str, str] | None:
 
 def squash(text: str) -> str:
     """NFC, without spaces or zero-width joiners: "ಗಾಂಧಿ ನಗರ" and "ಗಾಂಧಿನಗರ" compare equal."""
-    return re.sub(r"[\s‌‍]", "", unicodedata.normalize("NFC", text))
-
-
-def stem(phrase: str) -> str:
-    """A phrase without its final virama, so inflected forms match: ಚರ್ಚ್ → ಚರ್ಚಿನ, ಚರ್ಚ್ನಲ್ಲಿ."""
-    squashed = squash(phrase)
-    return squashed[:-1] if squashed.endswith(VIRAMA) else squashed
+    return re.sub(r"\s", "", ZERO_WIDTH.sub("", unicodedata.normalize("NFC", text)))
 
 
 def mentions(text: str, phrase: str) -> bool:
-    return stem(phrase) in squash(text)
+    """Whether the text contains the phrase, in any spacing and with a loanword ending.
+
+    A phrase ending in a virama also matches its inflected forms (ಚರ್ಚ್ನಲ್ಲಿ, ಚರ್ಚಿನ), but
+    only through the virama or a loanword vowel: ಟ್ಯಾಂಕ್ must not match ಟ್ಯಾಂಕರ್ (tanker).
+    """
+    target, squashed = squash(phrase), squash(text)
+    if not target.endswith(VIRAMA):
+        return target in squashed
+    pattern = re.escape(target[:-1]) + f"[{VIRAMA}{LOANWORD_VOWELS}]"
+    return re.search(pattern, squashed) is not None
 
 
 WARD_PHRASES: dict[str, list[str]] = {
@@ -252,12 +257,32 @@ WARD_PHRASES: dict[str, list[str]] = {
     for ward in WARDS
 }
 WARD_BY_NUMBER = {str(ward["number"]): ward["id"] for ward in WARDS}
-NUMBER_BY_WORD = {word: number for number, word in TEMPLATES["english_number_words"].items()}
+# Number words as Prisma may leave them, in Kannada script: English (ಫೋರ್) and Kannada (ಎರಡು).
+NUMBER_BY_WORD = {
+    word: number
+    for key in ("english_number_words", "kannada_number_words")
+    for number, word in TEMPLATES[key].items()
+}
+NUMBER_BY_ORDINAL = {word: number for number, word in TEMPLATES["kannada_ordinals"].items()}
+
+
+def _alternatives(words: dict[str, str]) -> str:
+    return "|".join(sorted(words, key=len, reverse=True))
+
+
 WARD_NUMBER = re.compile(
-    r"ವಾರ್ಡ್\s*(?:ನಂಬರ್\s*)?(\d+(?!\d)|"
-    + "|".join(sorted(NUMBER_BY_WORD, key=len, reverse=True))
+    # ವಾರ್ಡ್ 4, ವಾರ್ಡ್ ನಂಬರ್ 4, ವಾರ್ಡ್ ಫೋರ್, ವಾರ್ಡ್ ನಾಲ್ಕು
+    r"ವಾರ್ಡ್\s*(?:ನಂಬರ್\s*)?(?P<after>\d+(?!\d)|"
+    + _alternatives(NUMBER_BY_WORD)
     + ")"
+    # 4ನೇ ವಾರ್ಡ್, 4 ನೇ ವಾರ್ಡ್, ನಾಲ್ಕನೇ ವಾರ್ಡ್
+    + r"|(?:(?P<ordinal>\d+)\s*ನೇ|(?P<word>"
+    + _alternatives(NUMBER_BY_ORDINAL)
+    + r"))\s*ವಾರ್ಡ್"
 )
+# Street-level places that belong to no ward (ಸೆಕೆಂಡ್ ಕ್ರಾಸ್, 3ನೇ ಮೇನ್, ಮೇನ್ ರೋಡ್). A bare
+# ಕ್ರಾಸ್ is not one: ರೋಡ್ ಕ್ರಾಸ್ ಮಾಡೋಕೆ is "to cross the road".
+STREET = re.compile(r"(?:\d+\s*ನೇ|ಫಸ್ಟ್|ಸೆಕೆಂಡ್|ಥರ್ಡ್|ಫೋರ್ತ್|ಫಿಫ್ತ್|ಸಿಕ್ಸ್ತ್)\s*(?:ಕ್ರಾಸ್|ಮೇನ್)|ಮೇನ್\s*ರೋಡ್")
 
 
 def wards_mentioned(text: str) -> set[str]:
@@ -270,10 +295,20 @@ def wards_mentioned(text: str) -> set[str]:
         for ward_id, phrases in WARD_PHRASES.items()
         if any(mentions(text, phrase) for phrase in phrases)
     }
-    for match in WARD_NUMBER.finditer(unicodedata.normalize("NFC", text)):
-        number = NUMBER_BY_WORD.get(match.group(1), match.group(1))
+    for match in WARD_NUMBER.finditer(ZERO_WIDTH.sub("", unicodedata.normalize("NFC", text))):
+        if match["word"]:
+            number = NUMBER_BY_ORDINAL[match["word"]]
+        else:
+            raw = match["after"] or match["ordinal"]
+            number = NUMBER_BY_WORD.get(raw, raw)
         found.add(WARD_BY_NUMBER.get(number, f"ward-{number}"))
     return found
+
+
+def mentions_a_street(text: str) -> bool:
+    places = [place["kn"] for place in TEMPLATES["generic_places"]]
+    normalised = ZERO_WIDTH.sub("", unicodedata.normalize("NFC", text))
+    return any(mentions(text, place) for place in places) or bool(STREET.search(normalised))
 
 
 def problems(text: str, spec: dict[str, Any]) -> list[str]:
@@ -289,7 +324,13 @@ def problems(text: str, spec: dict[str, Any]) -> list[str]:
     labels, location = spec["labels"], spec["location"]
     mentioned = wards_mentioned(text)
     if labels["ward"] != "unknown":
-        if labels["ward"] not in mentioned:
+        # A name or landmark must be the asked-for phrase itself, so a near-miss cannot stand
+        # in. A number must parse to the ward: as text, ವಾರ್ಡ್ 1 is inside ವಾರ್ಡ್ 10.
+        if location["form"] == "number":
+            asked = labels["ward"] in mentioned
+        else:
+            asked = mentions(text, location["kn"])
+        if not asked:
             reasons.append("ward_missing")
         if mentioned - {labels["ward"]}:
             reasons.append("other_ward_mentioned")
@@ -298,7 +339,7 @@ def problems(text: str, spec: dict[str, Any]) -> list[str]:
             reasons.append("ward_mentioned_but_unknown")
         if location["form"] == "generic" and not mentions(text, location["kn"]):
             reasons.append("place_phrase_missing")
-        if location["form"] == "none" and any(mentions(text, phrase) for phrase in STREET_WORDS):
+        if location["form"] == "none" and mentions_a_street(text):
             reasons.append("place_mentioned_but_none")
 
     if spec["personal_id"]:
