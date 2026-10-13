@@ -40,3 +40,5 @@ How it works: every row's labels are sampled first from the templates in `data/g
 So the labels are right by construction. What the checks cannot catch is a sentence that is grammatical but wrong in meaning. That is what the 10% hand check in #12 is for.
 
 Output rows use the seed format (`id`, `text`, `gloss`, `labels`) plus `meta` (scenario, location form, model, attempt).
+
+The `gloss` is the model's own English for what it meant to say, not a translation of what it wrote, so it cannot be used to check a sentence. Check the Kannada against `meta.scenario` instead.
