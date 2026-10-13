@@ -97,11 +97,15 @@
   "6": "ಸಿಕ್ಸ್", "7": "ಸೆವೆನ್", "8": "ಎಯ್ಟ್", "9": "ನೈನ್", "10": "ಟೆನ್"
  },
  "fake_id_numbers": [
-  {"kind": "phone number", "digits": "9876543210"},
-  {"kind": "phone number", "digits": "9999999999"},
-  {"kind": "phone number", "digits": "9000000000"},
   {"kind": "phone number", "digits": "1234567890"},
+  {"kind": "phone number", "digits": "1212121212"},
+  {"kind": "phone number", "digits": "1000000001"},
   {"kind": "Aadhaar number", "digits": "1234 5678 9012"},
   {"kind": "Aadhaar number", "digits": "1111 2222 3333"}
- ]
+ ],
+ "fake_id_note": "Indian mobile numbers start with 6-9 and Aadhaar numbers never start with 0 or 1, so none of these can belong to anyone.",
+ "ward_aliases": {
+  "w04": ["ಆಸ್ಪತ್ರೆ"]
+ },
+ "ward_aliases_note": "Short forms that point to one ward. Hosapura has one hospital (Gandhinagar's government hospital), so the seed set labels a bare 'hospital' as w04 (seed-014)."
 }

@@ -97,18 +97,56 @@ def test_checks_reject_text_that_contradicts_its_labels() -> None:
     # A landmark names its ward, so a "no ward" row cannot contain one.
     assert "ward_mentioned_but_unknown" in gd.problems(text + " ಮಸೀದಿ ಹತ್ತಿರ", spec_for())
     assert "ward_mentioned_but_unknown" in gd.problems(text + " ವಾರ್ಡ್ 4", spec_for())
-    assert "ward_phrase_missing" in gd.problems(text, spec_for("w04", "name", "ಗಾಂಧಿನಗರ"))
+    assert "ward_missing" in gd.problems(text, spec_for("w04", "name", "ಗಾಂಧಿನಗರ"))
     assert "other_ward_mentioned" in gd.problems(
         text + " ಗಾಂಧಿನಗರ ಚರ್ಚ್ ಹತ್ತಿರ", spec_for("w04", "name", "ಗಾಂಧಿನಗರ")
     )
     assert "place_phrase_missing" in gd.problems(text, spec_for("unknown", "generic", "ಬೇಕರಿ ಪಕ್ಕ"))
 
 
+def test_ward_numbers_are_read_whole_and_cross_checked() -> None:
+    text = "ನೀರು ಬಂದಿಲ್ಲ ಮೂರು ದಿನ ಆಯ್ತು"
+    w01 = spec_for("w01", "number", "ವಾರ್ಡ್ 1")
+    assert gd.problems("ವಾರ್ಡ್ 1 " + text, w01) == []
+    # "ವಾರ್ಡ್ 1" is a substring of "ವಾರ್ಡ್ 10"; ward 10 must not pass for ward 1.
+    assert "ward_missing" in gd.problems("ವಾರ್ಡ್ 10 " + text, w01)
+    assert gd.wards_mentioned("ವಾರ್ಡ್ ನಂಬರ್ 10 ಅಲ್ಲಿ") == {"w10"}
+    assert gd.wards_mentioned("ವಾರ್ಡ್ ಫೋರ್ ಅಲ್ಲಿ") == {"w04"}
+    assert gd.wards_mentioned("ವಾರ್ಡ್ 4ರಲ್ಲಿ") == {"w04"}
+    assert gd.wards_mentioned("ವಾರ್ಡ್ 11 ಅಲ್ಲಿ") == {"ward-11"}
+    w05 = spec_for("w05", "name", "ಆಲದಮರಹಳ್ಳಿ")
+    assert "other_ward_mentioned" in gd.problems("ವಾರ್ಡ್ 2 ಆಲದಮರಹಳ್ಳಿ " + text, w05)
+
+
+def test_places_match_across_spacing_and_word_endings() -> None:
+    text = "ನೀರು ಬಂದಿಲ್ಲ ಮೂರು ದಿನ ಆಯ್ತು"
+    assert gd.wards_mentioned("ಗಾಂಧಿ ನಗರ ಅಲ್ಲಿ") == {"w04"}
+    assert gd.wards_mentioned("ಚರ್ಚಿನ ಹತ್ತಿರ") == {"w06"}
+    assert gd.wards_mentioned("ಆಸ್ಪತ್ರೆ ಮುಂದೆ") == {"w04"}  # alias, as labelled in seed-014
+    assert "ward_mentioned_but_unknown" in gd.problems("ಆಸ್ಪತ್ರೆ ಮುಂದೆ " + text, spec_for())
+    assert "place_mentioned_but_none" in gd.problems("ಫಿಫ್ತ್ ಕ್ರಾಸ್ ಅಲ್ಲಿ " + text, spec_for())
+    generic = spec_for("unknown", "generic", "ಬೇಕರಿ ಪಕ್ಕ")
+    assert gd.problems("ಬೇಕರಿ ಪಕ್ಕದಲ್ಲಿ " + text, generic) == []
+
+
+def test_text_must_be_kannada_script_only() -> None:
+    text = "ನೀರು ಬಂದಿಲ್ಲ ಮೂರು ದಿನ ಆಯ್ತು"
+    assert "not_kannada" in gd.problems(text + " पानी", spec_for())  # Devanagari
+    assert "not_kannada" in gd.problems(text + " నీరు", spec_for())  # Telugu
+    assert gd.problems(text + " 3", spec_for()) == []
+
+
+@pytest.mark.parametrize("row", gd.SEED, ids=lambda row: row["id"])
+def test_ward_matcher_agrees_with_every_hand_label(row: dict) -> None:
+    ward = row["labels"]["ward"]
+    assert gd.wards_mentioned(row["text"]) == (set() if ward == "unknown" else {ward})
+
+
 def test_checks_tie_long_numbers_to_the_personal_id_flag() -> None:
-    text = "ಲೈಟ್ ಆಫ್ ಆಗಿದೆ ನನ್ನ ನಂಬರ್ 9876543210 ಅಪ್ಡೇಟ್ ಕೊಡಿ"
+    text = "ಲೈಟ್ ಆಫ್ ಆಗಿದೆ ನನ್ನ ನಂಬರ್ 1234567890 ಅಪ್ಡೇಟ್ ಕೊಡಿ"
     assert "unexpected_long_number" in gd.problems(text, spec_for())
     spec = spec_for()
-    spec["personal_id"] = {"kind": "phone number", "digits": "9876543210"}
+    spec["personal_id"] = {"kind": "phone number", "digits": "1234567890"}
     assert gd.problems(text, spec) == []
     spec["personal_id"] = {"kind": "Aadhaar number", "digits": "1234 5678 9012"}
     assert "id_number_missing" in gd.problems(text, spec)

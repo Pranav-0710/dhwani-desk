@@ -34,7 +34,7 @@ The real run is on Kaggle / Colab: open `02_generate_data.ipynb`, add an `HF_TOK
 How it works: every row's labels are sampled first from the templates in `data/generation/scenarios.json` (department, scenario, urgency and hazard; ward and how it is mentioned; mood; flags). The language model only writes the caller's sentence for those labels. A sentence is kept only if it passes checks that keep it consistent with its labels:
 
 - Kannada script only.
-- The required ward or place phrase is there, and no other ward's name or landmark is.
+- The required ward or place phrase is there, and no other ward's name, landmark or number is (matched across spacing and word endings).
 - The ID number is there, or there is no long number at all.
 
 So the labels are right by construction. What the checks cannot catch is a sentence that is grammatical but wrong in meaning. That is what the 10% hand check in #12 is for.

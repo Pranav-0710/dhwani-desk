@@ -21,6 +21,7 @@ import json
 import os
 import random
 import re
+import unicodedata
 from collections import Counter
 from collections.abc import Iterator
 from pathlib import Path
@@ -55,10 +56,15 @@ WARD_FORM_WEIGHTS = {"name": 0.45, "landmark": 0.30, "number": 0.25}
 P_REPEAT, P_WANTS_HUMAN, P_PERSONAL_ID = 0.15, 0.08, 0.06
 
 MIN_WORDS, MAX_WORDS = 3, 40
+MAX_NEW_TOKENS = 512  # Kannada costs several tokens per word; the reply also carries the gloss
 LATIN = re.compile(r"[A-Za-z]")
 LONG_NUMBER = re.compile(r"\d(?:[\d ]{8,})\d")
-KANNADA = re.compile(r"[ಀ-೿‌‍]")
+# Allowed in a transcript: the Kannada block, zero-width (non-)joiners, ASCII digits, spaces.
+NOT_KANNADA = re.compile(r"[^ಀ-೿‌‍0-9\s]")
 PUNCTUATION = re.compile(r"[.,!?;:\"'“”‘’।()\[\]-]+")
+VIRAMA = "್"
+# Street-level words: a row labelled "no location" must not contain them.
+STREET_WORDS = [place["kn"] for place in TEMPLATES["generic_places"]] + ["ಕ್ರಾಸ್", "ಮೇನ್ ರೋಡ್"]
 
 
 # --- specs -------------------------------------------------------------------------------
@@ -224,12 +230,49 @@ def parse_reply(reply: str) -> dict[str, str] | None:
     return {"text": text, "gloss": gloss} if text and gloss else None
 
 
+def squash(text: str) -> str:
+    """NFC, without spaces or zero-width joiners: "ಗಾಂಧಿ ನಗರ" and "ಗಾಂಧಿನಗರ" compare equal."""
+    return re.sub(r"[\s‌‍]", "", unicodedata.normalize("NFC", text))
+
+
+def stem(phrase: str) -> str:
+    """A phrase without its final virama, so inflected forms match: ಚರ್ಚ್ → ಚರ್ಚಿನ, ಚರ್ಚ್ನಲ್ಲಿ."""
+    squashed = squash(phrase)
+    return squashed[:-1] if squashed.endswith(VIRAMA) else squashed
+
+
+def mentions(text: str, phrase: str) -> bool:
+    return stem(phrase) in squash(text)
+
+
+WARD_PHRASES: dict[str, list[str]] = {
+    ward["id"]: [ward["name"]]
+    + [landmark["name"] for landmark in ward["landmarks"]]
+    + TEMPLATES["ward_aliases"].get(ward["id"], [])
+    for ward in WARDS
+}
+WARD_BY_NUMBER = {str(ward["number"]): ward["id"] for ward in WARDS}
+NUMBER_BY_WORD = {word: number for number, word in TEMPLATES["english_number_words"].items()}
+WARD_NUMBER = re.compile(
+    r"ವಾರ್ಡ್\s*(?:ನಂಬರ್\s*)?(\d+(?!\d)|"
+    + "|".join(sorted(NUMBER_BY_WORD, key=len, reverse=True))
+    + ")"
+)
+
+
 def wards_mentioned(text: str) -> set[str]:
-    found = set()
-    for ward in WARDS:
-        names = [ward["name"]] + [landmark["name"] for landmark in ward["landmarks"]]
-        if any(name in text for name in names):
-            found.add(ward["id"])
+    """Every ward the text points to, by name, landmark, alias or number.
+
+    A number with no ward (ward 11) comes back as "ward-11", so it never passes for a real one.
+    """
+    found = {
+        ward_id
+        for ward_id, phrases in WARD_PHRASES.items()
+        if any(mentions(text, phrase) for phrase in phrases)
+    }
+    for match in WARD_NUMBER.finditer(unicodedata.normalize("NFC", text)):
+        number = NUMBER_BY_WORD.get(match.group(1), match.group(1))
+        found.add(WARD_BY_NUMBER.get(number, f"ward-{number}"))
     return found
 
 
@@ -238,8 +281,7 @@ def problems(text: str, spec: dict[str, Any]) -> list[str]:
     reasons = []
     if LATIN.search(text):
         reasons.append("latin_letters")
-    letters = re.sub(r"[\s\d]", "", text)
-    if letters and len(KANNADA.findall(letters)) / len(letters) < 0.95:
+    if NOT_KANNADA.search(text):
         reasons.append("not_kannada")
     if not MIN_WORDS <= len(text.split()) <= MAX_WORDS:
         reasons.append("length")
@@ -247,15 +289,17 @@ def problems(text: str, spec: dict[str, Any]) -> list[str]:
     labels, location = spec["labels"], spec["location"]
     mentioned = wards_mentioned(text)
     if labels["ward"] != "unknown":
-        if location["kn"] not in text:
-            reasons.append("ward_phrase_missing")
+        if labels["ward"] not in mentioned:
+            reasons.append("ward_missing")
         if mentioned - {labels["ward"]}:
             reasons.append("other_ward_mentioned")
     else:
         if mentioned or "ವಾರ್ಡ್" in text:
             reasons.append("ward_mentioned_but_unknown")
-        if location["form"] == "generic" and location["kn"] not in text:
+        if location["form"] == "generic" and not mentions(text, location["kn"]):
             reasons.append("place_phrase_missing")
+        if location["form"] == "none" and any(mentions(text, phrase) for phrase in STREET_WORDS):
+            reasons.append("place_mentioned_but_none")
 
     if spec["personal_id"]:
         if spec["personal_id"]["digits"].replace(" ", "") not in text.replace(" ", ""):
@@ -281,7 +325,8 @@ def load_model(name: str, four_bit: bool) -> tuple[Any, Any]:
         tokenizer.pad_token = tokenizer.eos_token
     gpu = torch.cuda.is_available()
     kwargs: dict[str, Any] = {
-        "device_map": "auto",
+        # Spread over every GPU (T4 x2). On a CPU, "auto" offloads to disk when RAM is short.
+        "device_map": "auto" if gpu else None,
         "dtype": torch.float16 if gpu else torch.float32,
     }
     if four_bit:
@@ -356,7 +401,7 @@ def generate(
                 tokenizer,
                 [build_messages(spec, rng) for spec in batch],
                 temperature,
-                max_new_tokens=200,
+                max_new_tokens=MAX_NEW_TOKENS,
             )
             for spec, reply in zip(batch, replies, strict=True):
                 parsed = parse_reply(reply)
@@ -394,6 +439,10 @@ def generate(
 # --- report and output -------------------------------------------------------------------
 
 
+def kept_share(requested: Counter, kept: Counter) -> dict[str, float]:
+    return {value: round(kept[value] / count, 3) for value, count in requested.items()}
+
+
 def report(
     specs: list[dict[str, Any]], accepted: list[dict[str, Any]], rejected: list[dict[str, Any]]
 ) -> dict[str, Any]:
@@ -417,6 +466,21 @@ def report(
         "labels": {
             name: dict(Counter(str(row["labels"][name]) for row in accepted).most_common())
             for name in SCHEMA
+        },
+        # Specs that failed every attempt are dropped, and some kinds fail more often than
+        # others; kept / requested per value shows which ones the kept set is short of.
+        "kept_share": {
+            name: kept_share(
+                Counter(str(spec["labels"][name]) for spec in specs),
+                Counter(str(row["labels"][name]) for row in accepted),
+            )
+            for name in SCHEMA
+        }
+        | {
+            "location_form": kept_share(
+                Counter(spec["location"]["form"] for spec in specs),
+                Counter(row["meta"]["location_form"] for row in accepted),
+            )
         },
     }
 
@@ -468,6 +532,9 @@ def push(out: Path, repo: str, message: str) -> None:
 
     api = HfApi(token=os.environ["HF_TOKEN"])
     api.create_repo(repo, repo_type="dataset", private=True, exist_ok=True)
+    # create_repo leaves an existing repo as it is, so a public one would stay public.
+    if not api.repo_info(repo, repo_type="dataset").private:
+        raise SystemExit(f"{repo} is public; make it private before uploading")
     api.upload_folder(folder_path=out, repo_id=repo, repo_type="dataset", commit_message=message)
 
 
