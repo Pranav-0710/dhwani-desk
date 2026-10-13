@@ -1,6 +1,6 @@
 # Decision: Timbre voice for the agent
 
-Status: **proposed — Kavin**, pending a listening check by Jey Pranav. Measured 2026-10-13.
+Status: **decided — Saanvi** (Jey Pranav, by ear, 2026-10-13). Measured 2026-10-13.
 
 ## Candidates
 
@@ -37,6 +37,10 @@ Time to first streamed audio for a short reply (ದಯವಿಟ್ಟು ಹತ�
 - **Prisma's ITN does convert Kannada number words** (ನಾಲ್ಕು → 4) even though it leaves an English "four" as ಫೋರ್.
 - **Time to first audio is ~0.8 s typical with spikes up to 4.7 s.** That alone uses half of the 1.5 s end-of-speech → first-audio budget. The dialogue layer (#9) should pre-synthesise fixed template lines at startup and cache them; only lines with ticket numbers or landmarks need live synthesis.
 
-## Recommendation
+## Decision
 
-**Kavin** as the default agent voice: native Kannada, "professional" persona that suits a civic helpline (including emergency hand-offs), word-perfect round trip. **Saanvi** is equally clear but tuned for ads/promotions; keep her as the alternative. The voice is a setting (`GNANI_TTS_VOICE`), so changing it later is one line.
+**Saanvi** is the agent voice. Jey Pranav listened to all five voices, at 16 kHz and at phone-quality 8 kHz, and picked Saanvi.
+
+- Native Kannada voice, word-perfect Prisma round trip, and time to first audio on a par with Kavin.
+- The analysis above had recommended Kavin for his "professional" persona. Saanvi's "expressive" persona was the concern for serious calls; re-check her tone on the emergency and hand-off lines once the templates exist (#9, #16).
+- Kavin stays the fallback. The voice is a setting (`GNANI_TTS_VOICE`), so switching is one line.

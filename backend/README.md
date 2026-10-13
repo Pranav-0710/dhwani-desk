@@ -60,7 +60,7 @@ Boost words live in `gnani/stt_bias_words.json` (Kannada script, single words).
 - `synthesize(text)` — the whole utterance in one response (`/inference`)
 - `stream(text)` — PCM chunks as they are produced (`/sse`), for low time to first audio
 
-Settings: `GNANI_TTS_VOICE` (default `Kavin`), `GNANI_TTS_LANG` (`kn-IN`), `GNANI_TTS_SAMPLE_RATE` (16000), `GNANI_TTS_SPEED` (0.85–1.15).
+Settings: `GNANI_TTS_VOICE` (default `Saanvi`), `GNANI_TTS_LANG` (`kn-IN`), `GNANI_TTS_SAMPLE_RATE` (16000), `GNANI_TTS_SPEED` (0.85–1.15).
 
 Voice audition (writes WAVs to `samples/tts/`):
 
@@ -69,4 +69,4 @@ uv run python -m scripts.tts_voices
 uv run python -m scripts.tts_voices --voices Kavin Saanvi --rate 8000
 ```
 
-Why Kavin: `docs/decisions/tts-voice.md`.
+Why Saanvi: `docs/decisions/tts-voice.md`.
