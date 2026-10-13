@@ -24,6 +24,31 @@ class Settings(BaseSettings):
     gnani_stt_bias_file: Path = BACKEND_DIR / "gnani" / "stt_bias_words.json"
     gnani_stt_bias_score: float = 1.0
 
+    gnani_tts_url: str = "https://api.vachana.ai/api/v1/tts"
+    gnani_tts_lang: str = "kn-IN"
+    gnani_tts_voice: str = "Kavin"
+    gnani_tts_sample_rate: int = 16000
+    gnani_tts_speed: float = 1.0
+
+    @field_validator("gnani_tts_voice", mode="before")
+    @classmethod
+    def _default_voice_when_blank(cls, value: object) -> object:
+        return "Kavin" if value in ("", None) else value
+
+    @field_validator("gnani_tts_sample_rate")
+    @classmethod
+    def _tts_rate(cls, value: int) -> int:
+        if value not in (8000, 16000, 22050, 24000, 44100, 48000):
+            raise ValueError("GNANI_TTS_SAMPLE_RATE must be a Timbre-supported rate")
+        return value
+
+    @field_validator("gnani_tts_speed")
+    @classmethod
+    def _tts_speed(cls, value: float) -> float:
+        if not 0.85 <= value <= 1.15:
+            raise ValueError("GNANI_TTS_SPEED must be between 0.85 and 1.15")
+        return value
+
     @field_validator("gnani_stt_sample_rate")
     @classmethod
     def _telephony_rate(cls, value: int) -> int:
