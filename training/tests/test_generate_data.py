@@ -1,0 +1,221 @@
+"""The parts of the generator that decide labels and keep them honest; no model needed."""
+
+import random
+
+import pytest
+
+import generate_data as gd
+
+SPECS = gd.sample_specs(3000, seed=7)
+
+
+def allowed_values(question: str) -> set:
+    spec = gd.SCHEMA[question]
+    if question == "ward":
+        return {ward["id"] for ward in gd.WARDS} | {"unknown"}
+    if spec["type"] == "noul":
+        return {True, False}
+    return set(spec["criteria"])
+
+
+def spec_for(text_ward: str = "unknown", form: str = "none", phrase: str | None = None) -> dict:
+    """A minimal spec, with the location parts `problems` reads."""
+    labels = {name: False for name in gd.SCHEMA}
+    labels.update(department="water", ward=text_ward, urgency="soon", caller_state="calm")
+    labels["has_location"] = form != "none"
+    return {"labels": labels, "location": {"form": form, "kn": phrase}, "personal_id": None}
+
+
+def test_specs_are_reproducible() -> None:
+    assert gd.sample_specs(50, seed=7) == SPECS[:50]
+
+
+def test_every_label_is_an_allowed_value() -> None:
+    for spec in SPECS:
+        assert set(spec["labels"]) == set(gd.SCHEMA)
+        for question, value in spec["labels"].items():
+            assert value in allowed_values(question), (spec["id"], question, value)
+
+
+def test_labels_follow_the_labelling_rules() -> None:
+    for spec in SPECS:
+        labels, location = spec["labels"], spec["location"]
+        if labels["out_of_scope"]:
+            assert labels["department"] == "other"
+            assert not labels["repeat_complaint"]
+        assert labels["has_location"] == (location["form"] != "none")
+        assert (labels["ward"] != "unknown") == (location["form"] in gd.WARD_FORM_WEIGHTS)
+        assert labels["contains_personal_id"] == (spec["personal_id"] is not None)
+
+
+def test_a_large_sample_covers_every_value() -> None:
+    for question in gd.SCHEMA:
+        used = {spec["labels"][question] for spec in SPECS}
+        assert used == allowed_values(question), question
+    forms = {spec["location"]["form"] for spec in SPECS}
+    assert forms == {"name", "landmark", "number", "generic", "none"}
+
+
+def test_scenarios_use_valid_urgency_and_cover_every_department() -> None:
+    urgency = set(gd.SCHEMA["urgency"]["criteria"])
+    assert set(gd.TEMPLATES["scenarios"]) == set(gd.SCHEMA["department"]["criteria"])
+    pools = list(gd.TEMPLATES["scenarios"].values()) + [gd.TEMPLATES["out_of_scope"]]
+    for scenario in (s for pool in pools for s in pool):
+        assert scenario["urgency"] in urgency
+        assert isinstance(scenario["safety_hazard"], bool)
+
+
+def test_generic_places_and_fake_ids_cannot_be_mistaken_for_a_ward() -> None:
+    for place in gd.TEMPLATES["generic_places"]:
+        assert not gd.wards_mentioned(place["kn"]), place
+        assert "ವಾರ್ಡ್" not in place["kn"]
+    for number in gd.TEMPLATES["fake_id_numbers"]:
+        assert gd.LONG_NUMBER.search(number["digits"])
+
+
+def test_prompt_states_the_location_and_ends_with_the_json_contract() -> None:
+    rng = random.Random(1)
+    for spec in SPECS[:200]:
+        user = gd.build_messages(spec, rng)[1]["content"]
+        if spec["location"]["kn"]:
+            assert f'"{spec["location"]["kn"]}"' in user
+        if spec["personal_id"]:
+            assert spec["personal_id"]["digits"] in user
+        assert user.rstrip().endswith('"gloss": "<its meaning in English>"}')
+
+
+def test_seed_sentences_pass_the_checks_for_their_own_labels() -> None:
+    row = next(r for r in gd.SEED if r["id"] == "seed-001")  # names Hoovinakeri, w01
+    assert gd.problems(row["text"], spec_for("w01", "name", "ಹೂವಿನಕೇರಿ")) == []
+
+
+def test_checks_reject_text_that_contradicts_its_labels() -> None:
+    text = "ನಮ್ಮ ಏರಿಯಾದಲ್ಲಿ ಮೂರು ದಿನದಿಂದ ನೀರು ಬಂದಿಲ್ಲ"
+    assert gd.problems(text, spec_for()) == []
+    assert "latin_letters" in gd.problems(text + " water", spec_for())
+    assert "length" in gd.problems("ನೀರು", spec_for())
+    # A landmark names its ward, so a "no ward" row cannot contain one.
+    assert "ward_mentioned_but_unknown" in gd.problems(text + " ಮಸೀದಿ ಹತ್ತಿರ", spec_for())
+    assert "ward_mentioned_but_unknown" in gd.problems(text + " ವಾರ್ಡ್ 4", spec_for())
+    assert "ward_missing" in gd.problems(text, spec_for("w04", "name", "ಗಾಂಧಿನಗರ"))
+    assert "other_ward_mentioned" in gd.problems(
+        text + " ಗಾಂಧಿನಗರ ಚರ್ಚ್ ಹತ್ತಿರ", spec_for("w04", "name", "ಗಾಂಧಿನಗರ")
+    )
+    assert "place_phrase_missing" in gd.problems(text, spec_for("unknown", "generic", "ಬೇಕರಿ ಪಕ್ಕ"))
+
+
+def test_ward_numbers_are_read_whole_and_cross_checked() -> None:
+    text = "ನೀರು ಬಂದಿಲ್ಲ ಮೂರು ದಿನ ಆಯ್ತು"
+    w01 = spec_for("w01", "number", "ವಾರ್ಡ್ 1")
+    assert gd.problems("ವಾರ್ಡ್ 1 " + text, w01) == []
+    # "ವಾರ್ಡ್ 1" is a substring of "ವಾರ್ಡ್ 10"; ward 10 must not pass for ward 1.
+    assert "ward_missing" in gd.problems("ವಾರ್ಡ್ 10 " + text, w01)
+    assert gd.wards_mentioned("ವಾರ್ಡ್ ನಂಬರ್ 10 ಅಲ್ಲಿ") == {"w10"}
+    assert gd.wards_mentioned("ವಾರ್ಡ್ ಫೋರ್ ಅಲ್ಲಿ") == {"w04"}
+    assert gd.wards_mentioned("ವಾರ್ಡ್ 4ರಲ್ಲಿ") == {"w04"}
+    assert gd.wards_mentioned("ವಾರ್ಡ್ 11 ಅಲ್ಲಿ") == {"ward-11"}
+    w05 = spec_for("w05", "name", "ಆಲದಮರಹಳ್ಳಿ")
+    assert "other_ward_mentioned" in gd.problems("ವಾರ್ಡ್ 2 ಆಲದಮರಹಳ್ಳಿ " + text, w05)
+
+
+def test_places_match_across_spacing_and_word_endings() -> None:
+    text = "ನೀರು ಬಂದಿಲ್ಲ ಮೂರು ದಿನ ಆಯ್ತು"
+    assert gd.wards_mentioned("ಗಾಂಧಿ ನಗರ ಅಲ್ಲಿ") == {"w04"}
+    assert gd.wards_mentioned("ಚರ್ಚಿನ ಹತ್ತಿರ") == {"w06"}
+    assert gd.wards_mentioned("ಆಸ್ಪತ್ರೆ ಮುಂದೆ") == {"w04"}  # alias, as labelled in seed-014
+    assert "ward_mentioned_but_unknown" in gd.problems("ಆಸ್ಪತ್ರೆ ಮುಂದೆ " + text, spec_for())
+    assert "place_mentioned_but_none" in gd.problems("ಫಿಫ್ತ್ ಕ್ರಾಸ್ ಅಲ್ಲಿ " + text, spec_for())
+    generic = spec_for("unknown", "generic", "ಬೇಕರಿ ಪಕ್ಕ")
+    assert gd.problems("ಬೇಕರಿ ಪಕ್ಕದಲ್ಲಿ " + text, generic) == []
+
+
+def test_text_must_be_kannada_script_only() -> None:
+    text = "ನೀರು ಬಂದಿಲ್ಲ ಮೂರು ದಿನ ಆಯ್ತು"
+    assert "not_kannada" in gd.problems(text + " पानी", spec_for())  # Devanagari
+    assert "not_kannada" in gd.problems(text + " నీరు", spec_for())  # Telugu
+    assert gd.problems(text + " 3", spec_for()) == []
+
+
+@pytest.mark.parametrize("row", gd.SEED, ids=lambda row: row["id"])
+def test_ward_matcher_agrees_with_every_hand_label(row: dict) -> None:
+    ward = row["labels"]["ward"]
+    assert gd.wards_mentioned(row["text"]) == (set() if ward == "unknown" else {ward})
+
+
+def test_checks_tie_long_numbers_to_the_personal_id_flag() -> None:
+    text = "ಲೈಟ್ ಆಫ್ ಆಗಿದೆ ನನ್ನ ನಂಬರ್ 1234567890 ಅಪ್ಡೇಟ್ ಕೊಡಿ"
+    assert "unexpected_long_number" in gd.problems(text, spec_for())
+    spec = spec_for()
+    spec["personal_id"] = {"kind": "phone number", "digits": "1234567890"}
+    assert gd.problems(text, spec) == []
+    spec["personal_id"] = {"kind": "Aadhaar number", "digits": "1234 5678 9012"}
+    assert "id_number_missing" in gd.problems(text, spec)
+    assert gd.problems("ಟಿಕೆಟ್ ನಂಬರ್ 4521 ಇನ್ನೂ ಲೈಟ್ ಸರಿ ಮಾಡಿಲ್ಲ", spec_for()) == []
+
+
+@pytest.mark.parametrize(
+    ("reply", "expected"),
+    [
+        (
+            '{"text": "ನೀರು ಬಂದಿಲ್ಲ.", "gloss": "No water."}',
+            {"text": "ನೀರು ಬಂದಿಲ್ಲ", "gloss": "No water."},
+        ),
+        (
+            '```json\n{"text": "ಲೈಟ್ ಇಲ್ಲ, ಬೇಗ!", "gloss": "No light"}\n```',
+            {"text": "ಲೈಟ್ ಇಲ್ಲ ಬೇಗ", "gloss": "No light"},
+        ),
+        ("Sure! Here it is: ನೀರು ಬಂದಿಲ್ಲ", None),
+        ('{"text": "", "gloss": "x"}', None),
+        ('{"text": 3, "gloss": "x"}', None),
+        ('{"text": "ನೀರು", "gloss": "water"', None),
+    ],
+)
+def test_parse_reply(reply: str, expected: dict | None) -> None:
+    assert gd.parse_reply(reply) == expected
+
+
+def test_style_examples_never_show_a_ward_or_id_the_spec_does_not_have() -> None:
+    rng = random.Random(3)
+    for spec in SPECS[:300]:
+        user = gd.build_messages(spec, rng)[1]["content"]
+        examples = user.split("Style examples from other calls:")[1].split("Reply with JSON")[0]
+        assert examples.count("\n- ") == 3
+        if spec["labels"]["ward"] == "unknown":
+            assert not gd.wards_mentioned(examples), spec["id"]
+        if not spec["personal_id"]:
+            assert not gd.LONG_NUMBER.search(examples), spec["id"]
+
+
+def test_inflection_matching_does_not_reach_other_words() -> None:
+    text = "ಇನ್ನೂ ಬಂದಿಲ್ಲ ಸರ್ ಬೇಗ ಕಳಿಸಿ"
+    # ನೀರಿನ ಟ್ಯಾಂಕ್ (w09's water tank) is not ನೀರಿನ ಟ್ಯಾಂಕರ್ (a water tanker).
+    assert gd.wards_mentioned("ನೀರಿನ ಟ್ಯಾಂಕರ್ " + text) == set()
+    assert gd.wards_mentioned("ನೀರಿನ ಟ್ಯಾಂಕು ತುಂಬಿ ಹರೀತಿದೆ") == {"w09"}
+    w09 = spec_for("w09", "landmark", "ನೀರಿನ ಟ್ಯಾಂಕ್")
+    assert "ward_missing" in gd.problems("ನೀರಿನ ಟ್ಯಾಂಕರ್ " + text, w09)
+    # ಚರ್ಚ್ (w06's church) is not ಚರ್ಚೆ ("discussion").
+    assert gd.wards_mentioned("ಮೀಟಿಂಗ್ ಅಲ್ಲಿ ಚರ್ಚೆ ಮಾಡಿದ್ವಿ") == set()
+    assert gd.wards_mentioned("ಚರ್ಚ್ನಲ್ಲಿ") == {"w06"}
+
+
+def test_ward_rows_need_the_asked_for_phrase() -> None:
+    text = "ನೀರು ಬಂದಿಲ್ಲ ಮೂರು ದಿನ ಆಯ್ತು"
+    by_name = spec_for("w04", "name", "ಗಾಂಧಿನಗರ")
+    assert "ward_missing" in gd.problems("ಗಾಂಧಿ ಪ್ರತಿಮೆ ಹತ್ತಿರ " + text, by_name)
+    by_number = spec_for("w04", "number", "ವಾರ್ಡ್ 4")
+    assert gd.problems("4ನೇ ವಾರ್ಡ್ ಅಲ್ಲಿ " + text, by_number) == []
+
+
+def test_ward_numbers_in_ordinal_and_kannada_forms() -> None:
+    assert gd.wards_mentioned("ಆಲದಮರಹಳ್ಳಿ 6ನೇ ವಾರ್ಡ್") == {"w05", "w06"}
+    assert gd.wards_mentioned("6 ನೇ ವಾರ್ಡ್ ಅಲ್ಲಿ") == {"w06"}
+    assert gd.wards_mentioned("ಆರನೇ ವಾರ್ಡ್ ಅಲ್ಲಿ") == {"w06"}
+    assert gd.wards_mentioned("ವಾರ್ಡ್ ಎರಡು ಅಲ್ಲಿ") == {"w02"}
+    assert gd.wards_mentioned("ಮೂರನೇ ಸಲ ಕಾಲ್ ಮಾಡ್ತಿದೀನಿ") == set()
+
+
+def test_only_street_phrases_count_as_a_location() -> None:
+    text = "ನಾಯಿಗಳು ಮಕ್ಕಳನ್ನ ಅಟ್ಟಿಸ್ಕೊಂಡು ಬರ್ತವೆ"
+    assert gd.problems("ರೋಡ್ ಕ್ರಾಸ್ ಮಾಡೋಕೆ ಭಯ " + text, spec_for()) == []
+    for street in ("ಸೆಕೆಂಡ್ ಕ್ರಾಸ್", "3ನೇ ಕ್ರಾಸ್", "ಥರ್ಡ್ ಮೇನ್", "ಮೇನ್ ರೋಡ್ ಅಲ್ಲಿ"):
+        assert "place_mentioned_but_none" in gd.problems(f"{street} {text}", spec_for()), street
