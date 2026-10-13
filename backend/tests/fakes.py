@@ -1,0 +1,117 @@
+"""Test doubles shared by the WebSocket route tests."""
+
+import asyncio
+from types import TracebackType
+from typing import Self
+
+import pytest
+from fastapi.testclient import TestClient
+
+import app as app_module
+from config import Settings
+from gnani.prisma import SttEvent
+
+
+def isolated_settings(**overrides: object) -> Settings:
+    """Settings that ignore the developer's local .env."""
+    return Settings(_env_file=None, **overrides)
+
+
+class FakeStream:
+    """Stands in for PrismaStream. Queue None into `_events` to simulate a clean close."""
+
+    def __init__(self, enter_error: Exception | None = None) -> None:
+        self.audio = bytearray()
+        self.flushed = False
+        self.discarded = False
+        self.enter_error = enter_error
+        self.audio_error: Exception | None = None
+        self.close_code: int | None = None
+        self.close_reason = ""
+        self._events: asyncio.Queue[SttEvent | None] = asyncio.Queue()
+
+    async def __aenter__(self) -> Self:
+        if self.enter_error:
+            raise self.enter_error
+        self._events.put_nowait(SttEvent(type="connected"))
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        return None
+
+    async def send_audio(self, pcm: bytes) -> None:
+        if self.audio_error:
+            raise self.audio_error
+        self.audio.extend(pcm)
+        self._events.put_nowait(SttEvent(type="transcript", text="ರಸ್ತೆ", latency_ms=120))
+
+    async def flush(self) -> None:
+        self.flushed = True
+
+    def discard_pending(self) -> None:
+        self.discarded = True
+
+    def close_cleanly(self, code: int, reason: str) -> None:
+        self.close_code, self.close_reason = code, reason
+        self._events.put_nowait(None)
+
+    async def events(self):
+        while (event := await self._events.get()) is not None:
+            yield event
+
+
+def use_stream(monkeypatch: pytest.MonkeyPatch, stream: FakeStream) -> TestClient:
+    monkeypatch.setattr(app_module, "get_settings", lambda: isolated_settings(gnani_api_key="t"))
+    monkeypatch.setattr(app_module, "stt_stream_factory", lambda settings: stream)
+    return TestClient(app_module.app)
+
+
+class ScriptedBrowser:
+    """A browser socket as uvicorn presents it, for driving a route coroutine directly.
+
+    Sends `frames` (bytes = audio, str = text frame), then disconnects normally once
+    `leave_when(sent)` is true. Unlike TestClient, leaving never cancels the app mid-flight,
+    so these tests are deterministic.
+    """
+
+    def __init__(self, frames: list[bytes | str], leave_when=lambda sent: True) -> None:
+        self.frames = list(frames)
+        self.leave_when = leave_when
+        self.sent: list[dict | bytes] = []
+        self.closed_with: int | None = None
+
+    async def accept(self) -> None:
+        return None
+
+    async def receive(self) -> dict:
+        await asyncio.sleep(0.01)
+        if self.frames:
+            frame = self.frames.pop(0)
+            key = "bytes" if isinstance(frame, bytes) else "text"
+            return {"type": "websocket.receive", key: frame}
+        async with asyncio.timeout(5):
+            while not self.leave_when(self.sent):
+                await asyncio.sleep(0.01)
+        return {"type": "websocket.disconnect", "code": 1001}
+
+    async def send_json(self, data: dict) -> None:
+        self.sent.append(data)
+
+    async def send_bytes(self, data: bytes) -> None:
+        self.sent.append(data)
+
+    async def close(self, code: int = 1000) -> None:
+        self.closed_with = code
+
+
+def use_fakes(monkeypatch: pytest.MonkeyPatch, stream: FakeStream, tts=None) -> None:
+    """Point the app at fakes, for tests that drive route coroutines with ScriptedBrowser."""
+    monkeypatch.setattr(app_module, "get_settings", lambda: isolated_settings(gnani_api_key="t"))
+    monkeypatch.setattr(app_module, "stt_stream_factory", lambda settings: stream)
+    if tts is not None:
+        monkeypatch.setattr(app_module, "tts_client_factory", lambda settings: tts)

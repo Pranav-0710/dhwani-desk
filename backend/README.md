@@ -70,3 +70,18 @@ uv run python -m scripts.tts_voices --voices Kavin Saanvi --rate 8000
 ```
 
 Why Saanvi: `docs/decisions/tts-voice.md`.
+
+## Call (`/ws/call`)
+
+Everything `/ws/stt` does, plus a spoken agent reply to each transcript. For now the agent echoes the caller ("ನೀವು ಹೇಳಿದ್ದು: …"); the dialogue state machine replaces it in #9.
+
+Extra server → browser messages, per agent line, in order:
+
+1. `agent_text` (`text`)
+2. `agent_audio_start` (`sample_rate`, from `GNANI_TTS_SAMPLE_RATE`)
+3. binary frames of 16-bit mono PCM (whole samples)
+4. `agent_audio_end`
+
+A Timbre failure sends `tts_error` (`message`) before `agent_audio_end`; the call continues. `config` also carries `tts_sample_rate`.
+
+The phone page in `console/` is the browser side of this route.
