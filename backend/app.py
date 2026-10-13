@@ -1,12 +1,14 @@
 import asyncio
 import contextlib
+import logging
 from collections.abc import Callable
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from websockets.exceptions import InvalidStatus, WebSocketException
 
 from config import Settings, get_settings
-from gnani.prisma import PrismaConfig, PrismaStream, load_bias_words
+from gnani.prisma import PrismaConfig, PrismaError, PrismaStream, load_bias_words
+
+logger = logging.getLogger("dhwani.stt")
 
 app = FastAPI(title="Dhwani Desk", version="0.1.0")
 
@@ -37,52 +39,78 @@ def health() -> dict[str, str]:
 async def stt_proxy(websocket: WebSocket) -> None:
     """Relay browser audio to Prisma and Prisma's transcripts back to the browser.
 
-    The browser sends binary frames of 16-bit mono PCM at the configured sample rate and may
-    send the text frame "flush" to push out a trailing partial frame. It receives JSON events.
+    Contract (see backend/README.md): after `config` and `connected` arrive, the browser
+    streams binary frames of 16-bit mono PCM at `config.sample_rate`, in real time, and may
+    send the text frame "flush". It receives JSON events; `closed` or `error` followed by a
+    close ends the session.
     """
     await websocket.accept()
     settings = get_settings()
     if not settings.gnani_api_key.get_secret_value():
-        await websocket.send_json({"type": "error", "message": "GNANI_API_KEY is not set"})
-        await websocket.close(code=1011)
+        await _fail(websocket, "GNANI_API_KEY is not set")
         return
 
-    await websocket.send_json({"type": "config", "sample_rate": settings.gnani_stt_sample_rate})
     try:
         async with stt_stream_factory(settings) as stream:
-
-            async def pump_audio() -> None:
-                while True:
-                    message = await websocket.receive()
-                    if message["type"] == "websocket.disconnect":
-                        return
-                    if message.get("bytes"):
-                        await stream.send_audio(message["bytes"])
-                    elif message.get("text") == "flush":
-                        await stream.flush()
-
-            async def pump_events() -> None:
-                async for event in stream.events():
-                    await websocket.send_json(event.to_client())
-
-            tasks = {asyncio.create_task(pump_audio()), asyncio.create_task(pump_events())}
-            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-            for task in pending:
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
-            for task in done:
-                task.result()
-    except InvalidStatus as exc:
-        status = exc.response.status_code
-        await _send_error(websocket, f"Prisma rejected the connection: HTTP {status}")
-    except (OSError, WebSocketException) as exc:
-        await _send_error(websocket, f"Prisma connection failed: {type(exc).__name__}")
+            await websocket.send_json(
+                {"type": "config", "sample_rate": settings.gnani_stt_sample_rate}
+            )
+            ended_by = await _relay(websocket, stream)
+            if ended_by == "browser":
+                stream.discard_pending()
+        if ended_by == "prisma":
+            await _send_and_close(
+                websocket,
+                {
+                    "type": "closed",
+                    "by": "prisma",
+                    "code": stream.close_code,
+                    "reason": stream.close_reason,
+                },
+                code=1000,
+            )
+    except PrismaError as exc:
+        logger.warning("STT session failed: %s", exc)
+        await _fail(websocket, str(exc))
     except WebSocketDisconnect:
         return
 
 
-async def _send_error(websocket: WebSocket, message: str) -> None:
+async def _relay(websocket: WebSocket, stream: PrismaStream) -> str:
+    """Pump audio up and events down until one side ends; returns which side ended."""
+
+    async def pump_audio() -> None:
+        while True:
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                return
+            if message.get("bytes"):
+                await stream.send_audio(message["bytes"])
+            elif message.get("text") == "flush":
+                await stream.flush()
+
+    async def pump_events() -> None:
+        async for event in stream.events():
+            await websocket.send_json(event.to_client())
+
+    audio = asyncio.create_task(pump_audio())
+    events = asyncio.create_task(pump_events())
+    try:
+        done, _ = await asyncio.wait({audio, events}, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            task.result()
+        return "browser" if audio in done else "prisma"
+    finally:
+        for task in (audio, events):
+            task.cancel()
+        await asyncio.gather(audio, events, return_exceptions=True)
+
+
+async def _send_and_close(websocket: WebSocket, payload: dict, code: int) -> None:
     with contextlib.suppress(RuntimeError, WebSocketDisconnect):
-        await websocket.send_json({"type": "error", "message": message})
-        await websocket.close(code=1011)
+        await websocket.send_json(payload)
+        await websocket.close(code=code)
+
+
+async def _fail(websocket: WebSocket, message: str) -> None:
+    await _send_and_close(websocket, {"type": "error", "message": message}, code=1011)

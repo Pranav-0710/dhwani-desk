@@ -31,8 +31,17 @@ uv run pytest -q
 
 `/ws/stt` relays browser audio to Gnani Prisma and transcripts back.
 
-- Client → server: binary frames of 16-bit mono PCM at `GNANI_STT_SAMPLE_RATE` (8000 by default), any size; the text frame `flush` pushes out a trailing partial frame.
-- Server → client: JSON events — `config` (sample rate), `connected`, `processing`, `transcript` (`text`, `segment_index`, `audio_duration_ms`, `latency_ms`), `error`.
+Session contract:
+
+1. Server sends `config` (`sample_rate`) once Prisma has accepted the connection, then forwards Prisma's `connected`.
+2. **Start sending audio only after `connected`.** Send binary frames of 16-bit mono PCM at `config.sample_rate`, any size, **in real time**. Up to 3 s of backlog is drained slightly faster than real time; more than that ends the session with an `error`.
+3. Optional text frame `flush` pushes out a trailing partial frame.
+4. Server → client events: `processing`, `transcript` (`text`, `segment_index`, `audio_duration_ms`, `latency_ms`), `settings_updated`.
+5. The session ends with either:
+   - `closed` (`by: "prisma"`, `code`, `reason`) and a 1000 close — Prisma ended it cleanly (e.g. its 15-minute cap); reconnect for a new session.
+   - `error` (`message`) and a 1011 close — missing key, rejected key, Prisma unreachable or failed, or audio not sent in real time.
+
+   A Prisma `error` event that is *not* followed by a close is recoverable; the session continues.
 
 Smoke test against the live API (needs `GNANI_API_KEY` in the repo-root `.env`):
 

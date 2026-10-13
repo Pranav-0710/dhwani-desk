@@ -31,6 +31,13 @@ class Settings(BaseSettings):
             raise ValueError("GNANI_STT_SAMPLE_RATE must be 8000 or 16000")
         return value
 
+    @field_validator("gnani_stt_bias_score")
+    @classmethod
+    def _allowed_bias_score(cls, value: float) -> float:
+        if value not in (0.0, 0.5, 1.0, 1.5, 2.0):
+            raise ValueError("GNANI_STT_BIAS_SCORE must be one of 0.0, 0.5, 1.0, 1.5, 2.0")
+        return value
+
 
 @lru_cache
 def get_settings() -> Settings:
