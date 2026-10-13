@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "description": "The questions Laya answers about a caller's turn. Single source of truth for the seed/test labels, the benchmark (#6), data generation (#7, #12) and the backend decision layer (#15). Changing it is a shared-contract change: both owners review.",
+  "questions": {
+    "department": {
+      "type": "choice",
+      "instructions": "Which municipal department should handle this complaint?",
+      "criteria": {
+        "water": "drinking water supply: no water, low pressure, burst or leaking pipes, dirty or contaminated tap water, water tankers",
+        "sewage-drainage": "sewage, underground drainage, blocked or overflowing drains, open or broken manholes, broken drain slabs, rainwater flooding of streets",
+        "solid-waste": "garbage collection, garbage heaps, overflowing bins, dumped debris, burning garbage, dead animals on the road",
+        "roads": "potholes, damaged or dug-up roads, footpath encroachment, speed breakers, roads blocked by fallen trees",
+        "streetlights": "street lights not working or on during the day, fallen or sparking wires from light poles, bent or falling poles",
+        "stray-animals": "stray dogs, dog bites, cattle on roads, monkeys, snakes",
+        "other": "any other civic matter (parks, mosquito fogging, building permissions) or a request that is not a civic complaint"
+      }
+    },
+    "ward": {
+      "type": "choice",
+      "instructions": "Which ward of Hosapura is the complaint about?",
+      "criteria_source": "wards.json",
+      "note": "Options are the ward ids in wards.json plus 'unknown'. A ward counts only if the caller names it or a landmark unique to that ward."
+    },
+    "urgency": {
+      "type": "score",
+      "instructions": "How urgent is this complaint?",
+      "criteria": ["routine", "soon", "urgent", "emergency"]
+    },
+    "safety_hazard": {
+      "type": "noul",
+      "instructions": "Is there an immediate risk to someone's life or health, such as a live wire, an open manhole, flooding into a house, contaminated drinking water or an animal attack?"
+    },
+    "has_location": {
+      "type": "noul",
+      "instructions": "Did the caller give a usable location: a ward, a street, or a landmark?"
+    },
+    "repeat_complaint": {
+      "type": "noul",
+      "instructions": "Does the caller say this problem was already reported or has been pending for a long time despite complaints?"
+    },
+    "wants_human": {
+      "type": "noul",
+      "instructions": "Does the caller ask to speak to a human officer instead of the automated system?"
+    },
+    "caller_state": {
+      "type": "choice",
+      "instructions": "How is the caller feeling?",
+      "criteria": {
+        "calm": "calm, reporting matter-of-factly",
+        "frustrated": "annoyed or impatient, complaining about delays, but not insulting",
+        "distressed": "scared, panicking or pleading because someone may be hurt",
+        "abusive": "insulting or abusing the staff"
+      }
+    },
+    "out_of_scope": {
+      "type": "noul",
+      "instructions": "Is this not a municipal civic complaint at all, for example police, medical emergency, electricity bills, ration cards or a private dispute with neighbours?"
+    },
+    "contains_personal_id": {
+      "type": "noul",
+      "instructions": "Does the caller say a phone number, Aadhaar number, account number or other personal ID number?"
+    }
+  }
+}
