@@ -5,6 +5,7 @@ description = "Dhwani Desk backend: audio proxy, Gnani clients, dialogue, Laya d
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
+    "httpx2>=2.13",
     "pydantic-settings>=2.6",
     "uvicorn[standard]>=0.32",
     "websockets>=13.1",
@@ -12,7 +13,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "httpx2>=2.13",
     "pytest>=8.3",
     "ruff>=0.8",
 ]

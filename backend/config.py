@@ -5,6 +5,8 @@ from typing import Literal
 from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from gnani.timbre import DEFAULT_VOICE, SAMPLE_RATES
+
 BACKEND_DIR = Path(__file__).resolve().parent
 REPO_ROOT = BACKEND_DIR.parent
 
@@ -23,6 +25,31 @@ class Settings(BaseSettings):
     gnani_stt_format: Literal["verbatim", "transcribe"] = "transcribe"
     gnani_stt_bias_file: Path = BACKEND_DIR / "gnani" / "stt_bias_words.json"
     gnani_stt_bias_score: float = 1.0
+
+    gnani_tts_url: str = "https://api.vachana.ai/api/v1/tts"
+    gnani_tts_lang: str = "kn-IN"
+    gnani_tts_voice: str = DEFAULT_VOICE
+    gnani_tts_sample_rate: int = 16000
+    gnani_tts_speed: float = 1.0
+
+    @field_validator("gnani_tts_voice", mode="before")
+    @classmethod
+    def _default_voice_when_blank(cls, value: object) -> object:
+        return DEFAULT_VOICE if value in ("", None) else value
+
+    @field_validator("gnani_tts_sample_rate")
+    @classmethod
+    def _tts_rate(cls, value: int) -> int:
+        if value not in SAMPLE_RATES:
+            raise ValueError("GNANI_TTS_SAMPLE_RATE must be a Timbre-supported rate")
+        return value
+
+    @field_validator("gnani_tts_speed")
+    @classmethod
+    def _tts_speed(cls, value: float) -> float:
+        if not 0.85 <= value <= 1.15:
+            raise ValueError("GNANI_TTS_SPEED must be between 0.85 and 1.15")
+        return value
 
     @field_validator("gnani_stt_sample_rate")
     @classmethod
