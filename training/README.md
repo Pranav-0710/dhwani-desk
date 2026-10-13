@@ -14,7 +14,7 @@ uv sync
 ## Week-1 Laya Kannada gate (#6)
 
 ```bash
-uv run python laya_benchmark.py                    # all four variants, ~30 min on CPU
+uv run python laya_benchmark.py                    # all five variants, ~40 min on CPU
 uv run python laya_benchmark.py --variants A D --limit 10
 ```
 

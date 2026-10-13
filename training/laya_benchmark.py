@@ -1,6 +1,6 @@
 """Week-1 gate (#6): can Laya read Kannada caller turns well enough to build on?
 
-Runs Laya zero-shot on data/seed/seed.jsonl in four variants and scores every decision in
+Runs Laya zero-shot on data/seed/seed.jsonl in five variants and scores every decision in
 data/decision_schema.json against the hand labels:
 
   A  kn-state/en-questions   Kannada text, English questions (multilingual checkpoint)
@@ -8,8 +8,10 @@ data/decision_schema.json against the hand labels:
   C  en-gloss/en-questions   the English gloss, English questions (English checkpoint):
                              the ceiling for a translate-first pipeline with perfect MT
   D  keyword-rules           hand-written Kannada keyword rules, no model
+  E  en-gloss/multilingual   the English gloss on the multilingual checkpoint: separates
+                             the effect of English text from the effect of the checkpoint
 
-Usage (CPU is fine; ~30 minutes for all variants):
+Usage (CPU is fine; ~40 minutes for all variants):
     uv run python laya_benchmark.py                     # all variants
     uv run python laya_benchmark.py --variants A D --limit 10
     python laya_benchmark.py --device cuda                # Kaggle / Colab GPU
@@ -19,6 +21,7 @@ Writes results/benchmark.json and prints a markdown table.
 
 import argparse
 import json
+import math
 import re
 import statistics
 import time
@@ -124,11 +127,21 @@ def decode(answers: dict[str, Any]) -> dict[str, Any]:
         if spec["type"] == "noul":
             labels[name] = answer["noul"] >= 0.5
         elif spec["type"] == "score":
-            level = min(len(URGENCY) - 1, max(0, round(answer["score"])))
-            labels[name] = URGENCY[level]
+            # Most likely level. Laya's `score` is the expected level, and rounding it pulls
+            # an unsure answer to the middle of the scale.
+            level = max(answer["probabilities"], key=answer["probabilities"].get)
+            labels[name] = URGENCY[int(level)]
         else:
             labels[name] = answer["choice"]
     return labels
+
+
+def raw_scores(answers: dict[str, Any]) -> dict[str, Any]:
+    """What Laya returned before decoding, so the decoding can be revisited without a rerun."""
+    return {
+        name: answer["noul"] if answer["type"] == "noul" else answer["probabilities"]
+        for name, answer in answers.items()
+    }
 
 
 # --- variant D: keyword rules ------------------------------------------------------------
@@ -255,7 +268,7 @@ def keyword_rules(text: str) -> dict[str, Any]:
 
 def macro_f1(gold: list[str], pred: list[str]) -> float:
     scores = []
-    for label in sorted(set(gold)):
+    for label in sorted(set(gold) | set(pred)):
         tp = sum(g == p == label for g, p in zip(gold, pred, strict=True))
         fp = sum(p == label != g for g, p in zip(gold, pred, strict=True))
         fn = sum(g == label != p for g, p in zip(gold, pred, strict=True))
@@ -266,6 +279,11 @@ def macro_f1(gold: list[str], pred: list[str]) -> float:
 def recall(gold: list[bool], pred: list[bool]) -> float | None:
     positives = [p for g, p in zip(gold, pred, strict=True) if g]
     return sum(positives) / len(positives) if positives else None
+
+
+def precision(gold: list[bool], pred: list[bool]) -> float | None:
+    flagged = [g for g, p in zip(gold, pred, strict=True) if p]
+    return sum(flagged) / len(flagged) if flagged else None
 
 
 def score(rows: list[dict], predictions: list[dict]) -> dict[str, Any]:
@@ -283,6 +301,8 @@ def score(rows: list[dict], predictions: list[dict]) -> dict[str, Any]:
             ) / len(rows)
         if name in NOUL:
             entry["recall"] = recall(gold, pred)
+            entry["precision"] = precision(gold, pred)
+            entry["flagged"] = f"{sum(pred)} of {len(pred)} (true: {sum(gold)})"
         metrics[name] = entry
     return metrics
 
@@ -299,7 +319,7 @@ def laya_variant(kannada_questions: bool, use_gloss: bool, model: str | None) ->
     router = Router(device=DEVICE)
     questions = laya_questions(kannada_questions)
 
-    def predict(row: dict) -> tuple[dict, float]:
+    def predict(row: dict) -> tuple[dict, float, dict | None]:
         state = row["gloss"] if use_gloss else row["text"]
         started = time.perf_counter()
         # Laya's default lengths: a lower max_len cuts the option descriptions off and the
@@ -310,15 +330,15 @@ def laya_variant(kannada_questions: bool, use_gloss: bool, model: str | None) ->
             raise RuntimeError(
                 f"{row['id']}: Laya truncated {result['usage']['truncated_questions']}"
             )
-        return decode(result["answers"]), elapsed
+        return decode(result["answers"]), elapsed, raw_scores(result["answers"])
 
     return predict
 
 
 def rules_variant() -> Callable:
-    def predict(row: dict) -> tuple[dict, float]:
+    def predict(row: dict) -> tuple[dict, float, dict | None]:
         started = time.perf_counter()
-        return keyword_rules(row["text"]), time.perf_counter() - started
+        return keyword_rules(row["text"]), time.perf_counter() - started, None
 
     return predict
 
@@ -328,6 +348,7 @@ VARIANTS: dict[str, tuple[str, Callable[[], Callable]]] = {
     "B": ("kn-state/kn-questions", lambda: laya_variant(True, False, "multilingual")),
     "C": ("en-gloss/en-questions", lambda: laya_variant(False, True, "english")),
     "D": ("keyword-rules", rules_variant),
+    "E": ("en-gloss/multilingual", lambda: laya_variant(False, True, "multilingual")),
 }
 
 
@@ -342,20 +363,22 @@ def run(variant_keys: list[str], limit: int | None) -> dict[str, Any]:
         name, build = VARIANTS[key]
         predict = build()
         predict(rows[0])  # warm-up: model download and first-call overhead
-        predictions, seconds = [], []
+        predictions, seconds, raws = [], [], []
         for row in rows:
-            labels, elapsed = predict(row)
+            labels, elapsed, raw = predict(row)
             predictions.append(labels)
             seconds.append(elapsed)
+            raws.append(raw)
         report["variants"][key] = {
             "name": name,
             "metrics": score(rows, predictions),
             "seconds_per_turn": {
                 "median": statistics.median(seconds),
-                "p95": sorted(seconds)[max(0, round(0.95 * len(seconds)) - 1)],
+                "p95": sorted(seconds)[math.ceil(0.95 * len(seconds)) - 1],
             },
             "predictions": [
-                {"id": row["id"], **p} for row, p in zip(rows, predictions, strict=True)
+                {"id": row["id"], **labels, "raw": raw}
+                for row, labels, raw in zip(rows, predictions, raws, strict=True)
             ],
         }
         print(f"{key} {name}: done", flush=True)
@@ -371,8 +394,10 @@ def markdown(report: dict[str, Any]) -> str:
     )
     lines = [header, "|" + " --- |" * (len(keys) + 2)]
 
-    def cell(value: float | None) -> str:
-        return "—" if value is None else f"{value:.2f}"
+    def cell(value: float | str | None) -> str:
+        if value is None:
+            return "—"
+        return value if isinstance(value, str) else f"{value:.2f}"
 
     for name in SCHEMA:
         metrics = report["variants"][keys[0]]["metrics"][name]
