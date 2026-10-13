@@ -1,0 +1,107 @@
+{
+ "description": "Templates for synthetic caller turns (#7). Each scenario fixes department, urgency and safety_hazard, using the same conventions as data/seed/seed.jsonl (see data/README.md). The generator samples a scenario, a location form, a mood and the flags, and asks the language model only to put it into spoken Kannada.",
+ "urgency_meaning": {
+  "routine": "a minor nuisance or a question; nothing gets worse if it waits",
+  "soon": "a service has been missing or broken for days and needs fixing soon",
+  "urgent": "damage is spreading or a risk is building up and should be handled today",
+  "emergency": "someone may get hurt right now"
+ },
+ "scenarios": {
+  "water": [
+   {"en": "no water supply in the caller's area for a few days", "urgency": "soon", "safety_hazard": false},
+   {"en": "water comes at very low pressure and the overhead tank never fills", "urgency": "routine", "safety_hazard": false},
+   {"en": "water comes at odd hours, for example at midnight, and only for a short time", "urgency": "routine", "safety_hazard": false},
+   {"en": "a water pipe has burst on the road and clean water is being wasted", "urgency": "urgent", "safety_hazard": false},
+   {"en": "tap water is coming out dirty, reddish or smelly", "urgency": "urgent", "safety_hazard": true},
+   {"en": "drain water is mixing into the drinking water and people at home have fallen sick", "urgency": "emergency", "safety_hazard": true},
+   {"en": "the water tanker the corporation promised has not come", "urgency": "soon", "safety_hazard": false},
+   {"en": "a public tap or valve is leaking all day and water is wasted", "urgency": "routine", "safety_hazard": false}
+  ],
+  "sewage-drainage": [
+   {"en": "the street drain has not been cleaned for a long time and mosquitoes have increased", "urgency": "soon", "safety_hazard": false},
+   {"en": "a blocked drain is overflowing onto the road with a terrible stink", "urgency": "urgent", "safety_hazard": true},
+   {"en": "sewage from a blocked drain is coming into the caller's house", "urgency": "urgent", "safety_hazard": true},
+   {"en": "a manhole on the road has no lid and is wide open", "urgency": "emergency", "safety_hazard": true},
+   {"en": "the drain slab is broken and someone could fall in", "urgency": "urgent", "safety_hazard": true},
+   {"en": "every time it rains the road fills with water and vehicles cannot pass", "urgency": "soon", "safety_hazard": false},
+   {"en": "the underground drainage line keeps getting choked in the same place", "urgency": "soon", "safety_hazard": false},
+   {"en": "bad smell from the drain in front of the house, otherwise flowing", "urgency": "routine", "safety_hazard": false}
+  ],
+  "solid-waste": [
+   {"en": "the garbage van has not come to the street for many days", "urgency": "soon", "safety_hazard": false},
+   {"en": "the dustbin is full and garbage is spilling onto the road", "urgency": "soon", "safety_hazard": false},
+   {"en": "someone has set a garbage heap on fire and there is a lot of smoke", "urgency": "urgent", "safety_hazard": true},
+   {"en": "a dead animal has been lying on the road for days", "urgency": "soon", "safety_hazard": false},
+   {"en": "construction debris was dumped by the roadside at night", "urgency": "soon", "safety_hazard": false},
+   {"en": "garbage collectors mix the segregated wet and dry waste together", "urgency": "routine", "safety_hazard": false},
+   {"en": "garbage collectors ask for extra money to take the garbage", "urgency": "routine", "safety_hazard": false},
+   {"en": "a big garbage heap near houses has started to rot and smell", "urgency": "soon", "safety_hazard": false}
+  ],
+  "roads": [
+   {"en": "a big pothole on the road; a two-wheeler rider fell yesterday", "urgency": "urgent", "safety_hazard": true},
+   {"en": "the road was dug up for work and left unfinished for weeks", "urgency": "soon", "safety_hazard": false},
+   {"en": "the whole road surface is badly damaged", "urgency": "soon", "safety_hazard": false},
+   {"en": "shopkeepers have put their goods on the footpath and there is no space to walk", "urgency": "routine", "safety_hazard": false},
+   {"en": "a speed breaker has no paint and cannot be seen at night", "urgency": "soon", "safety_hazard": false},
+   {"en": "a tree has fallen and blocked the whole road; even an ambulance cannot pass", "urgency": "emergency", "safety_hazard": true},
+   {"en": "a pothole filled with rainwater cannot be seen and vehicles keep hitting it", "urgency": "urgent", "safety_hazard": true},
+   {"en": "the caller asks when the road in their area will be asphalted", "urgency": "routine", "safety_hazard": false}
+  ],
+  "streetlights": [
+   {"en": "the street light has not come on for weeks and the street is dark at night", "urgency": "soon", "safety_hazard": false},
+   {"en": "the street light stays on during the day and electricity is wasted", "urgency": "routine", "safety_hazard": false},
+   {"en": "a wire has fallen from the light pole and is sparking", "urgency": "emergency", "safety_hazard": true},
+   {"en": "a light pole is bent and about to fall where children play", "urgency": "urgent", "safety_hazard": true},
+   {"en": "several street lights in a row are off and women are afraid to walk at night", "urgency": "urgent", "safety_hazard": false},
+   {"en": "the street light keeps flickering on and off", "urgency": "routine", "safety_hazard": false},
+   {"en": "the light pole's junction box is open with wires showing at hand height", "urgency": "urgent", "safety_hazard": true}
+  ],
+  "stray-animals": [
+   {"en": "a stray dog bit a child and is still roaming there", "urgency": "emergency", "safety_hazard": true},
+   {"en": "stray dogs have increased and bark all night", "urgency": "routine", "safety_hazard": false},
+   {"en": "a pack of stray dogs chases two-wheelers and children", "urgency": "urgent", "safety_hazard": true},
+   {"en": "cattle lie in the middle of the road and could cause an accident", "urgency": "soon", "safety_hazard": false},
+   {"en": "monkeys get into houses and damage things", "urgency": "soon", "safety_hazard": false},
+   {"en": "a snake has come into the caller's compound", "urgency": "urgent", "safety_hazard": true},
+   {"en": "an injured stray dog is lying by the road", "urgency": "soon", "safety_hazard": false}
+  ],
+  "other": [
+   {"en": "the play equipment in the park is broken and children could get hurt", "urgency": "soon", "safety_hazard": false},
+   {"en": "the caller asks when mosquito fogging will be done in their area", "urgency": "routine", "safety_hazard": false},
+   {"en": "a neighbour seems to be constructing a building without permission", "urgency": "routine", "safety_hazard": false},
+   {"en": "the public toilet in the area is locked or very dirty", "urgency": "soon", "safety_hazard": false},
+   {"en": "the caller asks how to pay property tax or get a trade licence", "urgency": "routine", "safety_hazard": false}
+  ]
+ },
+ "out_of_scope": [
+  {"en": "a fight is going on near the caller's house and people are hitting each other", "urgency": "urgent", "safety_hazard": true},
+  {"en": "a family member has chest pain and they need an ambulance", "urgency": "emergency", "safety_hazard": true},
+  {"en": "the electricity bill is far too high and they want to complain about it", "urgency": "routine", "safety_hazard": false},
+  {"en": "they want to link their ration card or apply for a new one", "urgency": "routine", "safety_hazard": false},
+  {"en": "the neighbours built a wall on the caller's land and they want to file a complaint against them", "urgency": "routine", "safety_hazard": false},
+  {"en": "someone's bike was stolen from outside the house", "urgency": "soon", "safety_hazard": false},
+  {"en": "the power has been cut at home since morning", "urgency": "soon", "safety_hazard": false}
+ ],
+ "generic_places": [
+  {"kn": "ಸೆಕೆಂಡ್ ಕ್ರಾಸ್", "en": "second cross"},
+  {"kn": "ಥರ್ಡ್ ಮೇನ್ ರೋಡ್", "en": "third main road"},
+  {"kn": "ಪೆಟ್ರೋಲ್ ಬಂಕ್ ಹತ್ತಿರ", "en": "near the petrol bunk"},
+  {"kn": "ಹಾಲಿನ ಡೈರಿ ಹತ್ತಿರ", "en": "near the milk dairy"},
+  {"kn": "ಮೆಡಿಕಲ್ ಶಾಪ್ ಎದುರು", "en": "opposite the medical shop"},
+  {"kn": "ಅಂಗನವಾಡಿ ಹತ್ತಿರ", "en": "near the anganwadi"},
+  {"kn": "ಬೇಕರಿ ಪಕ್ಕ", "en": "next to the bakery"},
+  {"kn": "ಫಿಫ್ತ್ ಕ್ರಾಸ್", "en": "fifth cross"}
+ ],
+ "english_number_words": {
+  "1": "ಒನ್", "2": "ಟೂ", "3": "ತ್ರೀ", "4": "ಫೋರ್", "5": "ಫೈವ್",
+  "6": "ಸಿಕ್ಸ್", "7": "ಸೆವೆನ್", "8": "ಎಯ್ಟ್", "9": "ನೈನ್", "10": "ಟೆನ್"
+ },
+ "fake_id_numbers": [
+  {"kind": "phone number", "digits": "9876543210"},
+  {"kind": "phone number", "digits": "9999999999"},
+  {"kind": "phone number", "digits": "9000000000"},
+  {"kind": "phone number", "digits": "1234567890"},
+  {"kind": "Aadhaar number", "digits": "1234 5678 9012"},
+  {"kind": "Aadhaar number", "digits": "1111 2222 3333"}
+ ]
+}

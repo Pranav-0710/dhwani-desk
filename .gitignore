@@ -35,6 +35,7 @@ checkpoints/
 *.mp3
 *.flac
 data/generated/
+training/out/
 eval/runs/
 
 # Local databases

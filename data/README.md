@@ -7,6 +7,7 @@ All data here is **synthetic**: invented sentences, a fictional city (Hosapura) 
 | `decision_schema.json` | The 10 questions Laya answers per caller turn, with their options. Single source of truth for labels, the benchmark (#6), data generation (#7, #12) and the backend decision layer (#15). Changing it is a shared-contract change. |
 | `wards.json` | The 10 fictional wards of Hosapura and their landmarks. Every landmark belongs to exactly one ward. Ward names are also Prisma boost words (`backend/gnani/stt_bias_words.json`). |
 | `seed/seed.jsonl` | 50 hand-written, hand-labelled caller turns for the week-1 Laya Kannada benchmark (#6). |
+| `generation/scenarios.json` | Templates for synthetic training data (#7): scenarios per department with their urgency and hazard labels, out-of-scope requests, place phrases that belong to no ward, and placeholder ID numbers. Used by `training/generate_data.py`; the generated rows live on the private Hugging Face dataset repo, not here. |
 
 `backend/tests/test_seed_data.py` checks every row against the schema and the ward list in CI.
 
