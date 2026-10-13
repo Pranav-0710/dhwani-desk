@@ -6,7 +6,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/ws': { target: 'ws://localhost:8000', ws: true },
+      // 127.0.0.1, not localhost: uvicorn binds IPv4 and localhost may resolve to ::1.
+      '/ws': { target: 'ws://127.0.0.1:8000', ws: true },
     },
   },
 })

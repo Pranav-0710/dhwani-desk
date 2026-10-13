@@ -36,6 +36,8 @@ export default function App() {
           latencyMs: event.type === 'caller' ? event.latencyMs : undefined,
         }
         setLines((previous) => [...previous, line])
+        // A new agent line means any earlier voice hiccup is over.
+        if (event.type === 'agent') setError(null)
         break
       }
       case 'error':

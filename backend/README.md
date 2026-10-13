@@ -82,6 +82,6 @@ Extra server → browser messages, per agent line, in order:
 3. binary frames of 16-bit mono PCM (whole samples)
 4. `agent_audio_end`
 
-A Timbre failure sends `tts_error` (`message`) before `agent_audio_end`; the call continues. `config` also carries `tts_sample_rate`.
+A Timbre failure sends `tts_error` (`message`) before `agent_audio_end`; the call continues. Every `agent_audio_start` is followed by an `agent_audio_end`, because the phone page mutes its mic in between. When the call ends (browser leaves, or Prisma closes or fails), a line being spoken is cut off and queued lines are dropped. `config` also carries `tts_sample_rate`.
 
 The phone page in `console/` is the browser side of this route.

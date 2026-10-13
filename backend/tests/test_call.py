@@ -32,6 +32,12 @@ class FakeTts:
         yield b"\x02\x00" * 4
 
 
+async def wait_for(condition, timeout: float = 5.0) -> None:
+    async with asyncio.timeout(timeout):
+        while not condition():
+            await asyncio.sleep(0.01)
+
+
 class RecordingOutbox:
     def __init__(self) -> None:
         self.sent: list[dict | bytes] = []
@@ -57,10 +63,7 @@ def test_speaker_frames_each_line_and_survives_a_tts_failure() -> None:
         speaker = Speaker(FakeTts(fail_on="broken"), outbox, sample_rate=16000)
         speaker.say("broken")
         speaker.say("ಸರಿ")
-        while not (
-            outbox.sent and outbox.sent[-1] == {"type": "agent_audio_end"} and len(outbox.sent) > 4
-        ):
-            await asyncio.sleep(0.01)
+        await wait_for(lambda: outbox.sent.count({"type": "agent_audio_end"}) == 2)
         await speaker.aclose()
 
     asyncio.run(scenario())
@@ -90,8 +93,7 @@ def test_speaker_close_stops_mid_line_without_sending_more() -> None:
     async def scenario() -> None:
         speaker = Speaker(SlowTts(), outbox, sample_rate=8000)
         speaker.say("ನಮಸ್ಕಾರ")
-        while b"\x01\x00" not in outbox.sent:
-            await asyncio.sleep(0.01)
+        await wait_for(lambda: b"\x01\x00" in outbox.sent)
         await speaker.aclose()
 
     asyncio.run(scenario())
@@ -124,3 +126,48 @@ def test_call_echoes_each_transcript_as_speech(monkeypatch: pytest.MonkeyPatch) 
     ]
     assert tts.spoken == [reply]
     assert tts.closed
+
+
+def test_unexpected_tts_failure_still_ends_the_line_and_keeps_going() -> None:
+    outbox = RecordingOutbox()
+
+    class BuggyTts(FakeTts):
+        async def stream(self, text: str, voice: str | None = None) -> AsyncIterator[bytes]:
+            if text == "bad":
+                raise KeyError("surprise")
+            async for pcm in super().stream(text, voice):
+                yield pcm
+
+    async def scenario() -> None:
+        speaker = Speaker(BuggyTts(), outbox, sample_rate=16000)
+        speaker.say("bad")
+        speaker.say("ಸರಿ")
+        await wait_for(lambda: outbox.sent.count({"type": "agent_audio_end"}) == 2)
+        await speaker.aclose()
+
+    asyncio.run(scenario())
+
+    assert outbox.sent[:4] == [
+        {"type": "agent_text", "text": "bad"},
+        {"type": "agent_audio_start", "sample_rate": 16000},
+        {"type": "tts_error", "message": "KeyError"},
+        {"type": "agent_audio_end"},
+    ]
+    assert outbox.sent[4] == {"type": "agent_text", "text": "ಸರಿ"}
+
+
+def test_call_reports_tts_error_and_keeps_the_call_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    reply = f"{ECHO_PREFIX}ರಸ್ತೆ"
+    use_fakes(monkeypatch, FakeStream(), FakeTts(fail_on=reply))
+    browser = ScriptedBrowser(
+        [bytes(1024)], leave_when=lambda sent: {"type": "agent_audio_end"} in sent
+    )
+
+    asyncio.run(app_module.call(browser))
+
+    assert browser.sent[-3:] == [
+        {"type": "agent_audio_start", "sample_rate": 16000},
+        {"type": "tts_error", "message": "Timbre SERVICE_UNAVAILABLE: busy (HTTP 503)"},
+        {"type": "agent_audio_end"},
+    ]
+    assert browser.closed_with is None  # the browser left; the server never closed the call

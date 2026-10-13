@@ -24,6 +24,6 @@ npm run build
 
 ## How the phone page works
 
-- `src/audio/mic.ts` — captures the mic (echo cancellation on), downsamples to the backend's rate (8 kHz) and sends 16-bit PCM in ~40 ms batches.
+- `src/audio/mic.ts` — captures the mic (echo cancellation on), low-pass filters and downsamples to the backend's rate (8 kHz) and sends 16-bit PCM in ~40 ms batches.
 - `src/audio/player.ts` — plays the agent's streamed PCM gap-free.
-- `src/call/call-client.ts` — one call over `/ws/call`. Half duplex for now: the mic is muted while the agent speaks (plus 300 ms), so the echo bot never answers itself. Barge-in comes in #10.
+- `src/call/call-client.ts` — one call over `/ws/call`. Half duplex for now: the mic sends silence while the agent speaks and until its audio has finished playing (plus 300 ms), so the echo bot never answers itself. Barge-in comes in #10.

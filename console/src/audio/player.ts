@@ -35,9 +35,12 @@ export class PcmPlayer {
     source.onended = () => this.sources.delete(source)
   }
 
-  /** Seconds of agent audio still to play. */
+  /** Seconds of agent audio still to come out of the speakers, including output latency
+   * (Bluetooth headsets can add 150–300 ms). */
   remaining(): number {
-    return Math.max(0, this.nextStart - this.context.currentTime)
+    const queued = this.nextStart - this.context.currentTime
+    if (queued <= 0) return 0
+    return queued + (this.context.outputLatency || this.context.baseLatency || 0)
   }
 
   /** Cut the agent off (used for barge-in in #10). */
