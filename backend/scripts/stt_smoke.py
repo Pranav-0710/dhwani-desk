@@ -49,12 +49,15 @@ async def run(path: Path | None, output_format: str, wait_s: float) -> None:
                 print(event.to_client(), flush=True)
 
         listener = asyncio.create_task(listen())
-        await stream.send_audio(pcm)
         # One second of trailing silence lets the server's VAD close the last segment.
-        await stream.send_audio(b"\x00" * rate * 2)
+        audio = pcm + b"\x00" * rate * 2
+        # Feed 100 ms at a time in real time, as a microphone would.
+        chunk = rate * 2 // 10
+        for start in range(0, len(audio), chunk):
+            await stream.send_audio(audio[start : start + chunk])
+            await asyncio.sleep(0.1)
         await stream.flush()
-        audio_seconds = len(pcm) / (rate * 2) + 1
-        await asyncio.sleep(audio_seconds + wait_s)
+        await asyncio.sleep(wait_s)
         listener.cancel()
 
 
