@@ -156,7 +156,7 @@ def test_stream_raises_on_error_event_and_http_error() -> None:
 def test_settings_default_voice_when_env_value_is_blank(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GNANI_TTS_VOICE", "")
 
-    assert Settings(_env_file=None).gnani_tts_voice == "Kavin"
+    assert Settings(_env_file=None).gnani_tts_voice == "Saanvi"
 
 
 def test_settings_reject_speed_outside_timbre_range(monkeypatch: pytest.MonkeyPatch) -> None:

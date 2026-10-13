@@ -15,7 +15,7 @@ from typing import Any
 import httpx2
 
 SAMPLE_RATES = frozenset({8000, 16000, 22050, 24000, 44100, 48000})
-DEFAULT_VOICE = "Kavin"
+DEFAULT_VOICE = "Saanvi"
 # Tight enough that a stalled call fails fast; the caller adds an overall deadline.
 DEFAULT_TIMEOUT = httpx2.Timeout(connect=3.0, read=5.0, write=5.0, pool=2.0)
 

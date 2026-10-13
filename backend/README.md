@@ -60,7 +60,7 @@ Boost words live in `gnani/stt_bias_words.json` (Kannada script, single words).
 - `synthesize(text)` — the whole utterance in one response (`/inference`)
 - `stream(text)` — PCM chunks as they are produced (`/sse`), for low time to first audio
 
-Settings: `GNANI_TTS_VOICE` (default `Kavin`), `GNANI_TTS_LANG` (`kn-IN`), `GNANI_TTS_SAMPLE_RATE` (16000), `GNANI_TTS_SPEED` (0.85–1.15).
+Settings: `GNANI_TTS_VOICE` (default `Saanvi`), `GNANI_TTS_LANG` (`kn-IN`), `GNANI_TTS_SAMPLE_RATE` (16000), `GNANI_TTS_SPEED` (0.85–1.15).
 
 Voice audition (writes WAVs to `samples/tts/`):
 
@@ -69,4 +69,19 @@ uv run python -m scripts.tts_voices
 uv run python -m scripts.tts_voices --voices Kavin Saanvi --rate 8000
 ```
 
-Why Kavin: `docs/decisions/tts-voice.md`.
+Why Saanvi: `docs/decisions/tts-voice.md`.
+
+## Call (`/ws/call`)
+
+Everything `/ws/stt` does, plus a spoken agent reply to each transcript. For now the agent echoes the caller ("ನೀವು ಹೇಳಿದ್ದು: …"); the dialogue state machine replaces it in #9.
+
+Extra server → browser messages, per agent line, in order:
+
+1. `agent_text` (`text`)
+2. `agent_audio_start` (`sample_rate`, from `GNANI_TTS_SAMPLE_RATE`)
+3. binary frames of 16-bit mono PCM (whole samples)
+4. `agent_audio_end`
+
+A Timbre failure sends `tts_error` (`message`) before `agent_audio_end`; the call continues. Every `agent_audio_start` is followed by an `agent_audio_end`, because the phone page mutes its mic in between. When the call ends (browser leaves, or Prisma closes or fails), a line being spoken is cut off and queued lines are dropped. `config` also carries `tts_sample_rate`.
+
+The phone page in `console/` is the browser side of this route.

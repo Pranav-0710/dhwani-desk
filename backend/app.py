@@ -1,16 +1,24 @@
 import asyncio
 import contextlib
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
+from audio.outbox import Outbox
+from audio.speaker import Speaker
 from config import Settings, get_settings
-from gnani.prisma import PrismaConfig, PrismaError, PrismaStream, load_bias_words
+from dialogue.echo import EchoAgent
+from gnani.prisma import PrismaConfig, PrismaError, PrismaStream, SttEvent, load_bias_words
+from gnani.timbre import TimbreClient, TimbreConfig
 
 logger = logging.getLogger("dhwani.stt")
 
 app = FastAPI(title="Dhwani Desk", version="0.1.0")
+
+EventHandler = Callable[[SttEvent], Awaitable[None]]
+FinalMessage = tuple[dict[str, Any], int]
 
 
 def create_stt_stream(settings: Settings) -> PrismaStream:
@@ -27,7 +35,21 @@ def create_stt_stream(settings: Settings) -> PrismaStream:
     )
 
 
+def create_tts_client(settings: Settings) -> TimbreClient:
+    return TimbreClient(
+        TimbreConfig(
+            api_key=settings.gnani_api_key.get_secret_value(),
+            base_url=settings.gnani_tts_url,
+            voice=settings.gnani_tts_voice,
+            language=settings.gnani_tts_lang,
+            sample_rate=settings.gnani_tts_sample_rate,
+            speed=settings.gnani_tts_speed,
+        )
+    )
+
+
 stt_stream_factory: Callable[[Settings], PrismaStream] = create_stt_stream
+tts_client_factory: Callable[[Settings], TimbreClient] = create_tts_client
 
 
 @app.get("/health")
@@ -49,34 +71,84 @@ async def stt_proxy(websocket: WebSocket) -> None:
     if not settings.gnani_api_key.get_secret_value():
         await _fail(websocket, "GNANI_API_KEY is not set")
         return
+    outbox = Outbox(websocket)
 
+    async def forward(event: SttEvent) -> None:
+        await outbox.json(event.to_client())
+
+    config = {"type": "config", "sample_rate": settings.gnani_stt_sample_rate}
+    final = await _stt_session(websocket, settings, outbox, config, forward)
+    if final:
+        await _send_and_close(websocket, *final)
+
+
+@app.websocket("/ws/call")
+async def call(websocket: WebSocket) -> None:
+    """`/ws/stt` plus a spoken reply to every transcript (echo for now; #9 brings dialogue).
+
+    Extra server → browser messages: `agent_text`, `agent_audio_start` (`sample_rate`),
+    binary 16-bit mono PCM frames, `agent_audio_end`, and `tts_error` (the call continues).
+    """
+    await websocket.accept()
+    settings = get_settings()
+    if not settings.gnani_api_key.get_secret_value():
+        await _fail(websocket, "GNANI_API_KEY is not set")
+        return
+    outbox = Outbox(websocket)
+    agent = EchoAgent()
+    config = {
+        "type": "config",
+        "sample_rate": settings.gnani_stt_sample_rate,
+        "tts_sample_rate": settings.gnani_tts_sample_rate,
+    }
+
+    async with tts_client_factory(settings) as tts:
+        speaker = Speaker(tts, outbox, settings.gnani_tts_sample_rate)
+
+        async def converse(event: SttEvent) -> None:
+            await outbox.json(event.to_client())
+            if event.type == "transcript" and (reply := agent.reply(event.text)):
+                speaker.say(reply)
+
+        try:
+            final = await _stt_session(websocket, settings, outbox, config, converse)
+        finally:
+            await speaker.aclose()
+    if final:
+        await _send_and_close(websocket, *final)
+
+
+async def _stt_session(
+    websocket: WebSocket,
+    settings: Settings,
+    outbox: Outbox,
+    config: dict[str, Any],
+    on_event: EventHandler,
+) -> FinalMessage | None:
+    """Run one Prisma session for this socket. Returns the message to end the session with,
+    or None when the browser left (nobody to tell)."""
     try:
         async with stt_stream_factory(settings) as stream:
-            await websocket.send_json(
-                {"type": "config", "sample_rate": settings.gnani_stt_sample_rate}
-            )
-            ended_by = await _relay(websocket, stream)
+            await outbox.json(config)
+            ended_by = await _relay(websocket, stream, on_event)
             if ended_by == "browser":
                 stream.discard_pending()
-        if ended_by == "prisma":
-            await _send_and_close(
-                websocket,
-                {
-                    "type": "closed",
-                    "by": "prisma",
-                    "code": stream.close_code,
-                    "reason": stream.close_reason,
-                },
-                code=1000,
-            )
+                return None
+        closed = {
+            "type": "closed",
+            "by": "prisma",
+            "code": stream.close_code,
+            "reason": stream.close_reason,
+        }
+        return closed, 1000
     except PrismaError as exc:
         logger.warning("STT session failed: %s", exc)
-        await _fail(websocket, str(exc))
+        return {"type": "error", "message": str(exc)}, 1011
     except WebSocketDisconnect:
-        return
+        return None
 
 
-async def _relay(websocket: WebSocket, stream: PrismaStream) -> str:
+async def _relay(websocket: WebSocket, stream: PrismaStream, on_event: EventHandler) -> str:
     """Pump audio up and events down until one side ends; returns which side ended."""
 
     async def pump_audio() -> None:
@@ -91,7 +163,7 @@ async def _relay(websocket: WebSocket, stream: PrismaStream) -> str:
 
     async def pump_events() -> None:
         async for event in stream.events():
-            await websocket.send_json(event.to_client())
+            await on_event(event)
 
     audio = asyncio.create_task(pump_audio())
     events = asyncio.create_task(pump_events())
@@ -106,7 +178,7 @@ async def _relay(websocket: WebSocket, stream: PrismaStream) -> str:
         await asyncio.gather(audio, events, return_exceptions=True)
 
 
-async def _send_and_close(websocket: WebSocket, payload: dict, code: int) -> None:
+async def _send_and_close(websocket: WebSocket, payload: dict[str, Any], code: int) -> None:
     with contextlib.suppress(RuntimeError, WebSocketDisconnect):
         await websocket.send_json(payload)
         await websocket.close(code=code)
