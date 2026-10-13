@@ -1,0 +1,148 @@
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --text: #1c2430;
+  --muted: #5b6573;
+  --accent: #1f7a4d;
+  --danger: #c0392b;
+  --caller: #e8f0fe;
+  --agent: #e9f6ef;
+  --border: #dde1e7;
+  font-family: system-ui, 'Noto Sans Kannada', 'Nirmala UI', 'Tunga', sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12161c;
+    --surface: #1b2129;
+    --text: #e6e9ee;
+    --muted: #9aa4b2;
+    --accent: #3fb37a;
+    --danger: #e5675a;
+    --caller: #1f2c45;
+    --agent: #1c3328;
+    --border: #2c343f;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+}
+
+.phone {
+  width: 100%;
+  max-width: 440px;
+  min-height: 100vh;
+  padding: 24px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--surface);
+  border-inline: 1px solid var(--border);
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.subtitle {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.status {
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.status-listening {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.status-agent-speaking {
+  color: var(--text);
+  border-color: var(--text);
+}
+
+.error {
+  margin: 0;
+  color: var(--danger);
+}
+
+.transcript {
+  flex: 1;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.transcript li {
+  padding: 10px 12px;
+  border-radius: 10px;
+  display: grid;
+  gap: 2px;
+  max-width: 85%;
+}
+
+.transcript .caller {
+  background: var(--caller);
+  align-self: flex-end;
+}
+
+.transcript .agent {
+  background: var(--agent);
+  align-self: flex-start;
+}
+
+.who,
+.latency {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.text {
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+
+button {
+  font: inherit;
+  font-size: 1.1rem;
+  font-weight: 600;
+  padding: 14px;
+  border: none;
+  border-radius: 999px;
+  color: #fff;
+  cursor: pointer;
+}
+
+button.call {
+  background: var(--accent);
+}
+
+button.hang-up {
+  background: var(--danger);
+}
+
+button:focus-visible {
+  outline: 3px solid var(--text);
+  outline-offset: 2px;
+}
