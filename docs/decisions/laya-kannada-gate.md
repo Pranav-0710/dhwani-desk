@@ -40,11 +40,12 @@ Flags show *raised / truly positive* so false alarms are visible next to misses.
 
 What the numbers say:
 
-- **Language is the bottleneck, not the checkpoint.** On department, A → E (Kannada → English, same checkpoint) goes from 0.25 to 0.62. E → C (switching to the English checkpoint) adds only 0.01. The multilingual checkpoint understands an English complaint and not a Kannada one.
+- **For department, language is the bottleneck, not the checkpoint.** A → E (Kannada → English, same checkpoint) goes from 0.25 to 0.62. E → C (switching to the English checkpoint) adds only 0.01. The multilingual checkpoint understands an English complaint and not a Kannada one.
+- **For the flags, the English checkpoint is better.** Going from E to C on the same English text, safety_hazard goes from 2 to 6 right, repeat_complaint from 0 to 4 and has_location from 0 to 3, and caller_state and urgency improve too. If the build translates first, the English checkpoint is the stronger partner.
 - **Zero-shot Kannada picks a favourite.** A answers `other` for 33 of 50 turns and B answers `sewage-drainage` for 30 of 50. A and E answer `urgent` for all 50 turns.
 - **No variant can be trusted with the flags.** B's question wording makes it say yes to everything: it would send 19 genuine complaints away as out of scope and flag 31 turns as hazards to catch 11. A and E mostly say no and miss hazards. C is the most balanced, and it still catches only 6 of 15 hazards. These flags trigger escalation, so neither failure mode is acceptable.
 - **Ward and personal ID are lookups, not judgements.** B finds the right ward in 16 of the 21 turns that name one, but in the 29 turns that name none it still picks a ward 28 times. A flags a personal ID in 40 of 50 turns, though only 2 contain one. A table lookup and a digit check cannot make these mistakes.
-- **Kannada question text does not help.** B against A shows a little on department and urgency, but the flags collapse into "yes", and the questions cost about 35% more tokens (1,701 against 1,260 per turn).
+- **Kannada question text changes the failure, not the verdict.** B beats A a little on department, ward, urgency and has_location, but its flags collapse into "yes"; A's flags mostly say "no". Both are unusable zero-shot. The Kannada questions also cost about 35% more tokens (1,701 against 1,260 per turn, from Laya's `usage` on `seed-001`).
 - **Latency cannot rank the variants on this laptop.** The same variant's median moved by up to 2× between two runs (A 8.3 → 5.0 s, B 4.5 → 9.4 s). Token count is the steadier proxy. All variants are 15–50× over the budget anyway (see below).
 - The English checkpoint warns that some of its calibration temperatures are invalid, so C's confidences are uncalibrated.
 
@@ -56,10 +57,10 @@ Two benchmark bugs were caught before this result. Recording them so they are no
 ## Decision
 
 1. **Base for the build: multilingual checkpoint, Kannada transcript in, English question text (variant A's format).**
-   - English questions are shorter, easier to keep in sync with the schema, and did no worse than Kannada ones.
+   - Neither question language is usable zero-shot, so the choice rests on cost: English questions are about 35% shorter and are easier to keep in sync with the schema. Fine-tuning, not the wording, has to carry the Kannada.
    - Reading Kannada directly keeps a translation model out of the live path.
 2. **Fine-tuning is required, not optional.** #14 fine-tunes this format on the synthetic Kannada set (#7, #12) on Kaggle / Colab, and measures the gain on the unseen test set (#13). E shows the checkpoint can do the task when it understands the language. Fine-tuning is how it learns to understand Kannada complaints.
-3. **Translate-first is the fallback, not rejected.** Zero-shot it is clearly better (department 0.62 against 0.25). #14 also runs real IndicTrans2 on the test set's Kannada and scores it through the base checkpoint, so the comparison at the kill date uses real translation output, not the perfect gloss.
+3. **Translate-first is the fallback, not rejected.** Zero-shot it is clearly better (department 0.62 against 0.25). #14 also runs real IndicTrans2 on the test set's Kannada and scores it through both the multilingual and the English checkpoint (the English one was stronger on the flags), so the comparison at the kill date uses real translation output, not the perfect gloss.
 4. **Lookup decisions move out of Laya** into deterministic backend code:
    - `ward`: match ward names, numbers and landmarks from `wards.json`, and answer `unknown` when nothing matches.
    - `contains_personal_id`: a digit-run check.
@@ -70,9 +71,9 @@ Two benchmark bugs were caught before this result. Recording them so they are no
 
 **Kill criterion (Oct 23, start of week 3).** On the unseen test set, the fine-tuned checkpoint must beat both:
 - the keyword rules
-- IndicTrans2 + the base checkpoint
+- IndicTrans2 + the better of the two checkpoints
 
-on department macro-F1 and safety_hazard recall. If IndicTrans2 wins, the live path translates first. If the rules win, the build routes with rules and keeps Laya only for `caller_state` and `urgency`, where rules are weakest.
+on department macro-F1 and safety_hazard F1. F1 rather than recall, because a model that flags everything gets perfect recall; B already reached 0.73 recall that way. If IndicTrans2 wins, the live path translates first. If the rules win, the build routes with rules and keeps Laya only for `caller_state` and `urgency`, where rules are weakest.
 
 ## Latency: the main open problem
 
