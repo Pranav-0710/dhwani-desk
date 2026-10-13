@@ -1,0 +1,107 @@
+{
+  "city": "Hosapura (fictional)",
+  "authority": "Nagara Seva, City Corporation of Hosapura (fictional)",
+  "note": "Every ward and landmark is invented for the demo. Each landmark belongs to exactly one ward, so a landmark alone identifies the ward.",
+  "wards": [
+    {
+      "id": "w01",
+      "number": 1,
+      "name": "ಹೂವಿನಕೇರಿ",
+      "name_en": "Hoovinakeri",
+      "landmarks": [
+        { "name": "ಸರ್ಕಾರಿ ಶಾಲೆ", "name_en": "government school" },
+        { "name": "ಹೂವಿನಕೇರಿ ಪಾರ್ಕ್", "name_en": "Hoovinakeri park" }
+      ]
+    },
+    {
+      "id": "w02",
+      "number": 2,
+      "name": "ಕೆರೆಕೋಡಿ",
+      "name_en": "Kerekodi",
+      "landmarks": [
+        { "name": "ಕೆರೆ ಏರಿ", "name_en": "lake bund" },
+        { "name": "ಕೆರೆಕೋಡಿ ಮೇನ್ ರೋಡ್", "name_en": "Kerekodi main road" }
+      ]
+    },
+    {
+      "id": "w03",
+      "number": 3,
+      "name": "ಸಂತೆಪೇಟೆ",
+      "name_en": "Santhepete",
+      "landmarks": [
+        { "name": "ಸಂತೆ ಮೈದಾನ", "name_en": "market ground" },
+        { "name": "ಸಂತೆಪೇಟೆ ಬಸ್ ಸ್ಟಾಪ್", "name_en": "Santhepete bus stop" }
+      ]
+    },
+    {
+      "id": "w04",
+      "number": 4,
+      "name": "ಗಾಂಧಿನಗರ",
+      "name_en": "Gandhinagar",
+      "landmarks": [
+        { "name": "ಸರ್ಕಾರಿ ಆಸ್ಪತ್ರೆ", "name_en": "government hospital" },
+        { "name": "ಗಾಂಧಿ ಪ್ರತಿಮೆ", "name_en": "Gandhi statue" }
+      ]
+    },
+    {
+      "id": "w05",
+      "number": 5,
+      "name": "ಆಲದಮರಹಳ್ಳಿ",
+      "name_en": "Aaladamarahalli",
+      "landmarks": [
+        { "name": "ಬಸ್ ಸ್ಟ್ಯಾಂಡ್", "name_en": "bus stand" },
+        { "name": "ದೊಡ್ಡ ಆಲದ ಮರ", "name_en": "big banyan tree" }
+      ]
+    },
+    {
+      "id": "w06",
+      "number": 6,
+      "name": "ರೈಲ್ವೆ ಕಾಲೋನಿ",
+      "name_en": "Railway Colony",
+      "landmarks": [
+        { "name": "ರೈಲ್ವೆ ಗೇಟ್", "name_en": "railway gate" },
+        { "name": "ಚರ್ಚ್", "name_en": "church" }
+      ]
+    },
+    {
+      "id": "w07",
+      "number": 7,
+      "name": "ತೋಟದಪಾಳ್ಯ",
+      "name_en": "Thotadapalya",
+      "landmarks": [
+        { "name": "ಮಸೀದಿ", "name_en": "mosque" },
+        { "name": "ತೆಂಗಿನ ತೋಟ", "name_en": "coconut grove" }
+      ]
+    },
+    {
+      "id": "w08",
+      "number": 8,
+      "name": "ಹೊಸಬಡಾವಣೆ",
+      "name_en": "Hosabadavane",
+      "landmarks": [
+        { "name": "ಫಸ್ಟ್ ಕ್ರಾಸ್", "name_en": "first cross" },
+        { "name": "ಕಮ್ಯುನಿಟಿ ಹಾಲ್", "name_en": "community hall" }
+      ]
+    },
+    {
+      "id": "w09",
+      "number": 9,
+      "name": "ಕುಂಬಾರಗೇರಿ",
+      "name_en": "Kumbaragere",
+      "landmarks": [
+        { "name": "ನೀರಿನ ಟ್ಯಾಂಕ್", "name_en": "water tank" },
+        { "name": "ಕುಂಬಾರರ ಬೀದಿ", "name_en": "potters' street" }
+      ]
+    },
+    {
+      "id": "w10",
+      "number": 10,
+      "name": "ಮಾರುತಿನಗರ",
+      "name_en": "Marutinagar",
+      "landmarks": [
+        { "name": "ಹನುಮಂತನ ದೇವಸ್ಥಾನ", "name_en": "Hanuman temple" },
+        { "name": "ಮಾರುತಿನಗರ ಸರ್ಕಲ್", "name_en": "Marutinagar circle" }
+      ]
+    }
+  ]
+}
