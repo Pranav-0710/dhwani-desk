@@ -39,7 +39,7 @@ SEED: list[dict[str, Any]] = [
     if line.strip()
 ]
 
-DEFAULT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+DEFAULT_MODEL = "Qwen/Qwen3-14B"  # chosen in the pilots; see 02_generate_data.ipynb
 
 DEPARTMENT_WEIGHTS = {
     "water": 0.16,
