@@ -37,7 +37,9 @@ How it works: every row's labels are sampled first from the templates in `data/g
 - The required ward or place phrase is there, and no other ward's name, landmark or number is (matched across spacing and word endings).
 - The ID number is there, or there is no long number at all.
 
-So the labels are right by construction. What the checks cannot catch is a sentence that is grammatical but wrong in meaning. That is what the 10% hand check in #12 is for.
+- Meaning check: the model is shown its own sentence without the request and must pick the scenario it was written for, out of every scenario in that department, a few from others, and "none of these". This catches sentences that are well-formed but say something else; in the first Qwen3-14B pilot about 15% did. Turn it off with `--no-meaning-check`.
+
+So the labels are right by construction, as far as the model can read its own Kannada. What the checks still cannot catch is a sentence that the model misreads the same way it miswrote it. That is what the 10% hand check in #12 is for.
 
 Output rows use the seed format (`id`, `text`, `gloss`, `labels`) plus `meta` (scenario, location form, model, attempt).
 

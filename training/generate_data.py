@@ -350,6 +350,57 @@ def problems(text: str, spec: dict[str, Any]) -> list[str]:
     return reasons
 
 
+ALL_SCENARIOS = [
+    scenario["en"]
+    for pool in [*TEMPLATES["scenarios"].values(), TEMPLATES["out_of_scope"]]
+    for scenario in pool
+]
+NONE_OF_THESE = "none of these"
+CHECK_SYSTEM = "You read Kannada speech-to-text transcripts and answer questions about them."
+CHECK_DISTRACTORS = 3
+
+
+def build_check(
+    text: str, spec: dict[str, Any], rng: random.Random
+) -> tuple[list[dict[str, str]], list[str], int]:
+    """A question the model answers about its own sentence without seeing the request.
+
+    The options are every scenario of the spec's pool (siblings differ in urgency and hazard),
+    a few from other departments, and "none of these". Returns the messages, the options and
+    the number of the right one.
+    """
+    labels = spec["labels"]
+    pool = (
+        TEMPLATES["out_of_scope"]
+        if labels["out_of_scope"]
+        else TEMPLATES["scenarios"][labels["department"]]
+    )
+    own = [scenario["en"] for scenario in pool]
+    elsewhere = [scenario for scenario in ALL_SCENARIOS if scenario not in own]
+    options = own + rng.sample(elsewhere, CHECK_DISTRACTORS)
+    rng.shuffle(options)
+    options.append(NONE_OF_THESE)
+    user = "\n".join(
+        [
+            "A caller to a city corporation helpline said this "
+            "(a speech-to-text transcript in Kannada):",
+            "",
+            text,
+            "",
+            "Which option best describes what the caller is reporting? "
+            "Reply with the option number only.",
+            *[f"{number}. {option}" for number, option in enumerate(options, 1)],
+        ]
+    )
+    messages = [{"role": "system", "content": CHECK_SYSTEM}, {"role": "user", "content": user}]
+    return messages, options, options.index(spec["scenario"]) + 1
+
+
+def parse_choice(reply: str) -> int | None:
+    match = re.search(r"\d+", reply)
+    return int(match.group()) if match else None
+
+
 def dedup_key(text: str) -> str:
     return re.sub(r"\s+", "", text)
 
@@ -385,11 +436,17 @@ def complete(
     model: Any,
     tokenizer: Any,
     conversations: list[list[dict[str, str]]],
-    temperature: float,
+    temperature: float | None,
     max_new_tokens: int,
 ) -> list[str]:
+    """One reply per conversation: sampled at `temperature`, or greedy when it is None."""
     import torch
 
+    sampling = (
+        {"do_sample": True, "temperature": temperature, "top_p": 0.95}
+        if temperature is not None
+        else {"do_sample": False}
+    )
     prompts = [
         # enable_thinking=False turns off reasoning traces on models that have them (Qwen3);
         # other chat templates ignore it.
@@ -402,9 +459,7 @@ def complete(
     with torch.no_grad():
         output = model.generate(
             **batch,
-            do_sample=True,
-            temperature=temperature,
-            top_p=0.95,
+            **sampling,
             max_new_tokens=max_new_tokens,
             pad_token_id=tokenizer.pad_token_id,
         )
@@ -418,6 +473,12 @@ def chunks(items: list[Any], size: int) -> Iterator[list[Any]]:
         yield items[start : start + size]
 
 
+def rejection(
+    spec: dict[str, Any], attempt: int, reasons: list[str], reply: str, **extra: Any
+) -> dict[str, Any]:
+    return {"id": spec["id"], "attempt": attempt, "reasons": reasons, "reply": reply} | extra
+
+
 def generate(
     specs: list[dict[str, Any]],
     model_name: str,
@@ -426,8 +487,15 @@ def generate(
     temperature: float,
     four_bit: bool,
     seed: int,
+    meaning_check: bool = True,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Rows that passed every check, and every failed attempt with its reasons."""
+    """Rows that passed every check, and every failed attempt with its reasons.
+
+    With `meaning_check`, a sentence that passes the text checks is shown back to the model
+    without the request, and kept only if the model picks the scenario it was written for.
+    That drops sentences that are well-formed but say something else (a light that is "on"
+    instead of "off", a wrong word for the animal), which the text checks cannot see.
+    """
     model, tokenizer = load_model(model_name, four_bit)
     rng = random.Random(seed)
     seen = {dedup_key(row["text"]) for row in SEED}
@@ -444,15 +512,34 @@ def generate(
                 temperature,
                 max_new_tokens=MAX_NEW_TOKENS,
             )
+            candidates = []
             for spec, reply in zip(batch, replies, strict=True):
                 parsed = parse_reply(reply)
                 reasons = problems(parsed["text"], spec) if parsed else ["unparseable"]
-                if parsed and not reasons and dedup_key(parsed["text"]) in seen:
-                    reasons = ["duplicate"]
                 if reasons:
-                    rejected.append(
-                        {"id": spec["id"], "attempt": attempt, "reasons": reasons, "reply": reply}
-                    )
+                    rejected.append(rejection(spec, attempt, reasons, reply))
+                    retry.append(spec)
+                else:
+                    candidates.append((spec, parsed, reply))
+
+            verdicts: list[str | None] = [None] * len(candidates)
+            if meaning_check and candidates:
+                checks = [build_check(parsed["text"], spec, rng) for spec, parsed, _ in candidates]
+                answers = complete(
+                    model, tokenizer, [messages for messages, _, _ in checks], None, 8
+                )
+                for index, ((_, options, right), answer) in enumerate(
+                    zip(checks, answers, strict=True)
+                ):
+                    picked = parse_choice(answer)
+                    if picked != right:
+                        valid = picked is not None and 1 <= picked <= len(options)
+                        verdicts[index] = options[picked - 1] if valid else answer.strip()
+
+            for (spec, parsed, reply), picked in zip(candidates, verdicts, strict=True):
+                if picked is not None or dedup_key(parsed["text"]) in seen:
+                    reasons = ["meaning_check_failed"] if picked is not None else ["duplicate"]
+                    rejected.append(rejection(spec, attempt, reasons, reply, picked=picked))
                     retry.append(spec)
                     continue
                 seen.add(dedup_key(parsed["text"]))
@@ -466,6 +553,7 @@ def generate(
                             "location_form": spec["location"]["form"],
                             "model": model_name,
                             "attempt": attempt,
+                            "meaning_check": meaning_check,
                         },
                     }
                 )
@@ -539,7 +627,9 @@ def dataset_card(model_name: str, summary: dict[str, Any]) -> str:
             "Synthetic Kannada caller turns for fine-tuning Laya on the decisions in "
             "`data/decision_schema.json` of the dhwani-desk repo. Every sentence is "
             f"machine-written by `{model_name}` from a sampled spec; the labels come from the "
-            "spec, and a row is kept only if its text passes consistency checks. The city "
+            "spec, and a row is kept only if its text passes consistency checks and the model, "
+            "shown the sentence without the request, picks the scenario it was written for. "
+            "The city "
             "(Hosapura), its wards and the authority are fictional; ID numbers are placeholders.",
             "",
             "Files: `train.jsonl` (kept rows), `rejected.jsonl` (failed attempts), "
@@ -591,6 +681,12 @@ def main() -> None:
     parser.add_argument("--four-bit", action="store_true", help="load in 4-bit (one T4)")
     parser.add_argument("--dry-run", action="store_true", help="print prompts, load no model")
     parser.add_argument("--push-repo", help="private HF dataset repo to upload to")
+    parser.add_argument(
+        "--no-meaning-check",
+        dest="meaning_check",
+        action="store_false",
+        help="keep sentences without asking the model which scenario they describe",
+    )
     args = parser.parse_args()
 
     specs = sample_specs(args.n, args.seed)
@@ -609,8 +705,14 @@ def main() -> None:
         args.temperature,
         args.four_bit,
         args.seed,
+        args.meaning_check,
     )
-    summary = {"model": args.model, "seed": args.seed, **report(specs, accepted, rejected)}
+    summary = {
+        "model": args.model,
+        "seed": args.seed,
+        "meaning_check": args.meaning_check,
+        **report(specs, accepted, rejected),
+    }
     write_output(args.out, args.model, accepted, rejected, summary)
     print(json.dumps(summary, ensure_ascii=False, indent=1))
     if args.push_repo:

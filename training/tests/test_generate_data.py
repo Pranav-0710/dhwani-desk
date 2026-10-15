@@ -1,6 +1,8 @@
 """The parts of the generator that decide labels and keep them honest; no model needed."""
 
+import json
 import random
+import re
 
 import pytest
 
@@ -219,3 +221,74 @@ def test_only_street_phrases_count_as_a_location() -> None:
     assert gd.problems("ರೋಡ್ ಕ್ರಾಸ್ ಮಾಡೋಕೆ ಭಯ " + text, spec_for()) == []
     for street in ("ಸೆಕೆಂಡ್ ಕ್ರಾಸ್", "3ನೇ ಕ್ರಾಸ್", "ಥರ್ಡ್ ಮೇನ್", "ಮೇನ್ ರೋಡ್ ಅಲ್ಲಿ"):
         assert "place_mentioned_but_none" in gd.problems(f"{street} {text}", spec_for()), street
+
+
+def test_scenario_texts_are_unique_so_the_meaning_check_can_tell_them_apart() -> None:
+    assert len(gd.ALL_SCENARIOS) == len(set(gd.ALL_SCENARIOS))
+
+
+def test_meaning_check_offers_the_right_scenario_once_among_its_pool_and_distractors() -> None:
+    rng = random.Random(5)
+    for spec in SPECS[:300]:
+        messages, options, right = gd.build_check("ನೀರು ಬಂದಿಲ್ಲ", spec, rng)
+        assert options[right - 1] == spec["scenario"]
+        assert options.count(spec["scenario"]) == 1
+        assert options[-1] == gd.NONE_OF_THESE
+        labels = spec["labels"]
+        pool_name = "out_of_scope" if labels["out_of_scope"] else labels["department"]
+        pool = (
+            gd.TEMPLATES["out_of_scope"]
+            if pool_name == "out_of_scope"
+            else gd.TEMPLATES["scenarios"][pool_name]
+        )
+        assert len(options) == len(pool) + gd.CHECK_DISTRACTORS + 1
+        user = messages[1]["content"]
+        # The model must not see the request it wrote the sentence for.
+        assert "ನೀರು ಬಂದಿಲ್ಲ" in user and "What happened" not in user
+        assert f"{right}. {spec['scenario']}" in user
+
+
+@pytest.mark.parametrize(
+    ("reply", "expected"),
+    [("3", 3), (" 3.", 3), ("Option 12", 12), ("", None), ("three", None)],
+)
+def test_parse_choice(reply: str, expected: int | None) -> None:
+    assert gd.parse_choice(reply) == expected
+
+
+def test_generation_keeps_only_rows_whose_meaning_check_picks_their_scenario(monkeypatch) -> None:
+    """The loop end to end with a fake model: odd sentences fail the meaning check."""
+    scenario = gd.TEMPLATES["scenarios"]["water"][0]["en"]
+    specs = []
+    for i in range(1, 7):
+        spec = spec_for()
+        specs.append({"id": f"gen-{i:05d}", "scenario": scenario, **spec})
+    written = iter(range(1, 1000))
+
+    def fake_complete(model, tokenizer, conversations, temperature, max_new_tokens):
+        replies = []
+        for messages in conversations:
+            user = messages[-1]["content"]
+            if messages[0]["content"] == gd.CHECK_SYSTEM:
+                text = user.split("\n\n")[1]
+                options = dict(re.findall(r"^(\d+)\. (.*)$", user, re.M))
+                right = next(number for number, option in options.items() if option == scenario)
+                odd = int(text.split()[-1]) % 2
+                replies.append(str(len(options)) if odd else right)
+            else:
+                n = next(written)
+                replies.append(json.dumps({"text": f"ನೀರು ಬಂದಿಲ್ಲ ಮೂರು ದಿನ ಆಯ್ತು {n}", "gloss": "x"}))
+        return replies
+
+    monkeypatch.setattr(gd, "load_model", lambda name, four_bit: (None, None))
+    monkeypatch.setattr(gd, "complete", fake_complete)
+    accepted, rejected = gd.generate(specs, "fake", 4, 1, 0.9, False, 0)
+
+    assert [row["text"].split()[-1] for row in accepted] == ["2", "4", "6"]
+    assert all(row["meta"]["meaning_check"] for row in accepted)
+    assert [row["reasons"] for row in rejected] == [["meaning_check_failed"]] * 3
+    assert all(row["picked"] == gd.NONE_OF_THESE for row in rejected)
+
+    written = iter(range(1, 1000))
+    accepted, rejected = gd.generate(specs, "fake", 4, 1, 0.9, False, 0, meaning_check=False)
+    assert len(accepted) == 6 and not rejected
