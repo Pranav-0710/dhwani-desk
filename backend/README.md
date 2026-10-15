@@ -73,9 +73,25 @@ Why Saanvi: `docs/decisions/tts-voice.md`.
 
 ## Call (`/ws/call`)
 
-Everything `/ws/stt` does, plus a spoken agent reply to each transcript. For now the agent echoes the caller ("ನೀವು ಹೇಳಿದ್ದು: …"); the dialogue state machine replaces it in #9.
+Everything `/ws/stt` does, plus the agent. It greets the caller once Prisma is connected, then answers every caller turn. A turn is the transcript segments that arrive less than 0.6 s apart (`dialogue/turns.py`).
 
-Extra server → browser messages, per agent line, in order:
+What the agent says comes from the state machine in `dialogue/machine.py`. It is greet → listen → decide → one of these:
+- redirect a non-civic request and close
+- hand off to an officer
+- ask for what is missing
+- read back the ticket number and close
+
+The lines are in `dialogue/templates/kn.yaml`. Until Laya is served (#15), the decisions come from keyword rules in `dialogue/standin.py`. Fixed lines are synthesised once per process and replayed from memory (`audio/tts_cache.py`).
+
+Before the lines of each reply, the browser gets a `dialogue` message:
+- `keys`: the template keys, in speaking order
+- `state`: `listening`, `handed_off` or `closed`
+- `reason`: why it was handed off or closed
+- `slots`: department, ward, and whether a location was given
+- `ticket`: when one was filed
+- `decision`: every answer behind the reply
+
+Then, per agent line, in order:
 
 1. `agent_text` (`text`)
 2. `agent_audio_start` (`sample_rate`, from `GNANI_TTS_SAMPLE_RATE`)
@@ -84,4 +100,4 @@ Extra server → browser messages, per agent line, in order:
 
 A Timbre failure sends `tts_error` (`message`) before `agent_audio_end`; the call continues. Every `agent_audio_start` is followed by an `agent_audio_end`, because the phone page mutes its mic in between. When the call ends (browser leaves, or Prisma closes or fails), a line being spoken is cut off and queued lines are dropped. `config` also carries `tts_sample_rate`.
 
-The phone page in `console/` is the browser side of this route.
+The phone page in `console/` is the browser side of this route. To try a call without a microphone, `uv run python -m scripts.call_smoke` phones the running server with synthetic caller speech and prints the transcripts, decisions and agent lines with timings.

@@ -8,8 +8,13 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from audio.outbox import Outbox
 from audio.speaker import Speaker
+from audio.tts_cache import AudioCache, CachedSpeech
 from config import Settings, get_settings
-from dialogue.echo import EchoAgent
+from dialogue.decision import Decider
+from dialogue.machine import CountingDesk, Dialogue, Reply
+from dialogue.standin import KeywordDecider
+from dialogue.templates import load_templates
+from dialogue.turns import TURN_PAUSE_S, TurnCollector
 from gnani.prisma import PrismaConfig, PrismaError, PrismaStream, SttEvent, load_bias_words
 from gnani.timbre import TimbreClient, TimbreConfig
 
@@ -50,6 +55,13 @@ def create_tts_client(settings: Settings) -> TimbreClient:
 
 stt_stream_factory: Callable[[Settings], PrismaStream] = create_stt_stream
 tts_client_factory: Callable[[Settings], TimbreClient] = create_tts_client
+# Keyword rules until the fine-tuned Laya checkpoint is served (#15).
+decider_factory: Callable[[], Decider] = KeywordDecider
+turn_pause_s = TURN_PAUSE_S
+
+TEMPLATES = load_templates()
+TTS_CACHE: AudioCache = {}
+TICKETS = CountingDesk()
 
 
 @app.get("/health")
@@ -84,10 +96,11 @@ async def stt_proxy(websocket: WebSocket) -> None:
 
 @app.websocket("/ws/call")
 async def call(websocket: WebSocket) -> None:
-    """`/ws/stt` plus a spoken reply to every transcript (echo for now; #9 brings dialogue).
+    """`/ws/stt` plus the agent: it greets, then answers every caller turn (dialogue/).
 
-    Extra server → browser messages: `agent_text`, `agent_audio_start` (`sample_rate`),
-    binary 16-bit mono PCM frames, `agent_audio_end`, and `tts_error` (the call continues).
+    Extra server → browser messages: `dialogue` (state, slots, ticket and the decision behind
+    each reply), `agent_text`, `agent_audio_start` (`sample_rate`), binary 16-bit mono PCM
+    frames, `agent_audio_end`, and `tts_error` (the call continues).
     """
     await websocket.accept()
     settings = get_settings()
@@ -95,7 +108,8 @@ async def call(websocket: WebSocket) -> None:
         await _fail(websocket, "GNANI_API_KEY is not set")
         return
     outbox = Outbox(websocket)
-    agent = EchoAgent()
+    dialogue = Dialogue(TEMPLATES, decider_factory(), TICKETS)
+    turns = TurnCollector(turn_pause_s)
     config = {
         "type": "config",
         "sample_rate": settings.gnani_stt_sample_rate,
@@ -103,16 +117,47 @@ async def call(websocket: WebSocket) -> None:
     }
 
     async with tts_client_factory(settings) as tts:
-        speaker = Speaker(tts, outbox, settings.gnani_tts_sample_rate)
+        speech = CachedSpeech(
+            tts,
+            TTS_CACHE,
+            TEMPLATES.fixed_lines(),
+            settings.gnani_tts_voice,
+            settings.gnani_tts_sample_rate,
+        )
+        speaker = Speaker(speech, outbox, settings.gnani_tts_sample_rate)
+
+        async def answer(reply: Reply) -> None:
+            if not reply.keys:
+                return
+            await outbox.json(reply.to_client(dialogue.slots))
+            for line in reply.lines:
+                speaker.say(line)
+
+        async def answer_turns() -> None:
+            while True:
+                text = await turns.turns.get()
+                try:
+                    # The decider may be slow (Laya on CPU); keep the event loop free.
+                    reply = await asyncio.to_thread(dialogue.turn, text)
+                except Exception:
+                    logger.exception("Deciding a caller turn failed")
+                    continue
+                await answer(reply)
 
         async def converse(event: SttEvent) -> None:
             await outbox.json(event.to_client())
-            if event.type == "transcript" and (reply := agent.reply(event.text)):
-                speaker.say(reply)
+            if event.type == "connected":
+                await answer(dialogue.greet())
+            elif event.type == "transcript":
+                turns.add(event.text)
 
+        answering = asyncio.create_task(answer_turns())
         try:
             final = await _stt_session(websocket, settings, outbox, config, converse)
         finally:
+            answering.cancel()
+            await asyncio.gather(answering, return_exceptions=True)
+            await turns.aclose()
             await speaker.aclose()
     if final:
         await _send_and_close(websocket, *final)

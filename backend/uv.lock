@@ -63,6 +63,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx2" },
     { name = "pydantic-settings" },
+    { name = "pyyaml" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "websockets" },
 ]
@@ -78,6 +79,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx2", specifier = ">=2.13" },
     { name = "pydantic-settings", specifier = ">=2.6" },
+    { name = "pyyaml", specifier = ">=6" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
     { name = "websockets", specifier = ">=13.1" },
 ]
