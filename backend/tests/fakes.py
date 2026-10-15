@@ -1,6 +1,7 @@
 """Test doubles shared by the WebSocket route tests."""
 
 import asyncio
+import dataclasses
 from types import TracebackType
 from typing import Self
 
@@ -9,6 +10,7 @@ from fastapi.testclient import TestClient
 
 import app as app_module
 from config import Settings
+from dialogue.decision import Decision
 from gnani.prisma import SttEvent
 
 
@@ -95,9 +97,9 @@ class ScriptedBrowser:
             key = "bytes" if isinstance(frame, bytes) else "text"
             return {"type": "websocket.receive", key: frame}
         async with asyncio.timeout(5):
-            while not self.leave_when(self.sent):
+            while not self.leave_when(self.sent) and self.closed_with is None:
                 await asyncio.sleep(0.01)
-        return {"type": "websocket.disconnect", "code": 1001}
+        return {"type": "websocket.disconnect", "code": self.closed_with or 1001}
 
     async def send_json(self, data: dict) -> None:
         self.sent.append(data)
@@ -115,3 +117,37 @@ def use_fakes(monkeypatch: pytest.MonkeyPatch, stream: FakeStream, tts=None) -> 
     monkeypatch.setattr(app_module, "stt_stream_factory", lambda settings: stream)
     if tts is not None:
         monkeypatch.setattr(app_module, "tts_client_factory", lambda settings: tts)
+
+
+# A calm caller who has said nothing useful yet, and two decisions built from it.
+NOTHING = Decision(
+    department="other",
+    department_confidence=0.2,
+    ward="unknown",
+    urgency="soon",
+    safety_hazard=0.1,
+    has_location=0.1,
+    repeat_complaint=0.1,
+    wants_human=0.1,
+    caller_state="calm",
+    out_of_scope=0.1,
+    contains_personal_id=0.1,
+)
+ROADS = dataclasses.replace(NOTHING, department="roads", department_confidence=0.9)
+ROADS_IN_W04 = dataclasses.replace(ROADS, ward="w04", has_location=0.9)
+
+
+class ScriptedDecider:
+    """Returns the queued decisions in order (raising any queued exception) and records what
+    it was asked about."""
+
+    def __init__(self, *decisions: Decision | Exception) -> None:
+        self.decisions = list(decisions)
+        self.transcripts: list[str] = []
+
+    def decide(self, transcript: str) -> Decision:
+        self.transcripts.append(transcript)
+        decision = self.decisions.pop(0)
+        if isinstance(decision, Exception):
+            raise decision
+        return decision

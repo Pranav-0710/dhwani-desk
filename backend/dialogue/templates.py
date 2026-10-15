@@ -26,6 +26,7 @@ LINE_KEYS = frozenset(
         "read_back",
         "closing",
         "safety",
+        "safety_redirect",
         "handoff_human",
         "handoff_calm",
         "handoff_unclear",

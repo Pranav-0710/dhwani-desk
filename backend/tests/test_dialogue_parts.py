@@ -32,6 +32,8 @@ def test_keyword_stand_in_flags_escalations_and_stays_unsure_on_nothing() -> Non
     assert DECIDER.decide("ಕಂಬದಿಂದ ವೈರ್ ಬಿದ್ದು ಸ್ಪಾರ್ಕ್ ಆಗ್ತಿದೆ").safety_hazard > 0.6
     assert DECIDER.decide("ಕಂಬದಿಂದ ವೈರ್ ಬಿದ್ದು ಸ್ಪಾರ್ಕ್ ಆಗ್ತಿದೆ").urgency == "emergency"
     assert DECIDER.decide("ಆಫೀಸರ್ ಜೊತೆ ಮಾತಾಡಬೇಕು").wants_human > 0.7
+    chest_pain = DECIDER.decide("ಅಪ್ಪನಿಗೆ ಎದೆ ನೋವು ಬರ್ತಿದೆ ಆಂಬುಲೆನ್ಸ್ ಬೇಕು")
+    assert chest_pain.safety_hazard > 0.6 and chest_pain.out_of_scope > 0.7
     redirect = DECIDER.decide("ಕರೆಂಟ್ ಬಿಲ್ ತುಂಬಾ ಜಾಸ್ತಿ ಬಂದಿದೆ")
     assert redirect.out_of_scope > 0.7 and redirect.department == "other"
     nothing = DECIDER.decide("ಹಲೋ")
@@ -59,9 +61,7 @@ def collect_turns(segments: list[tuple[float, str]], pause_s: float = 0.05) -> l
 
 
 def test_segments_close_together_make_one_turn() -> None:
-    assert collect_turns([(0, "ವಾರ್ಡ್ ಫೋರ್ ಅಲ್ಲಿ"), (0.01, " ಲೈಟ್ ಹತ್ತುತ್ತಿಲ್ಲ ")]) == [
-        "ವಾರ್ಡ್ ಫೋರ್ ಅಲ್ಲಿ ಲೈಟ್ ಹತ್ತುತ್ತಿಲ್ಲ"
-    ]
+    assert collect_turns([(0, "ವಾರ್ಡ್ ಫೋರ್ ಅಲ್ಲಿ"), (0, " ಲೈಟ್ ಹತ್ತುತ್ತಿಲ್ಲ ")]) == ["ವಾರ್ಡ್ ಫೋರ್ ಅಲ್ಲಿ ಲೈಟ್ ಹತ್ತುತ್ತಿಲ್ಲ"]
 
 
 def test_a_pause_ends_the_turn_and_blank_segments_are_ignored() -> None:

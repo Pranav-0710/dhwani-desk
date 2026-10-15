@@ -46,5 +46,6 @@ class CachedSpeech:
             async for pcm in live:
                 heard.append(pcm)
                 yield pcm
-        if text in self._cacheable:
+        # An empty reply would make the line silent for every later caller.
+        if text in self._cacheable and heard:
             self._cache[key] = heard

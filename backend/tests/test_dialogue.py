@@ -4,6 +4,7 @@ import dataclasses
 import re
 
 import pytest
+from fakes import NOTHING, ROADS, ROADS_IN_W04, ScriptedDecider
 
 from dialogue.decision import Decision
 from dialogue.machine import (
@@ -17,37 +18,8 @@ from dialogue.templates import LINE_KEYS, load_templates, placeholders
 
 TEMPLATES = load_templates()
 
-# A calm caller who has said nothing useful yet.
-NOTHING = Decision(
-    department="other",
-    department_confidence=0.2,
-    ward="unknown",
-    urgency="soon",
-    safety_hazard=0.1,
-    has_location=0.1,
-    repeat_complaint=0.1,
-    wants_human=0.1,
-    caller_state="calm",
-    out_of_scope=0.1,
-    contains_personal_id=0.1,
-)
-ROADS = dataclasses.replace(NOTHING, department="roads", department_confidence=0.9)
-ROADS_IN_W04 = dataclasses.replace(ROADS, ward="w04", has_location=0.9)
 
-
-class ScriptedDecider:
-    """Returns the queued decisions in order and records what it was asked about."""
-
-    def __init__(self, *decisions: Decision) -> None:
-        self.decisions = list(decisions)
-        self.transcripts: list[str] = []
-
-    def decide(self, transcript: str) -> Decision:
-        self.transcripts.append(transcript)
-        return self.decisions.pop(0)
-
-
-def dialogue(*decisions: Decision) -> tuple[Dialogue, ScriptedDecider]:
+def dialogue(*decisions: Decision | Exception) -> tuple[Dialogue, ScriptedDecider]:
     decider = ScriptedDecider(*decisions)
     return Dialogue(TEMPLATES, decider, CountingDesk(start=1004)), decider
 
@@ -94,11 +66,22 @@ def test_not_a_civic_complaint_is_redirected_and_closed_without_a_ticket() -> No
     assert (reply.state, reply.reason, reply.ticket) == (State.CLOSED, "out_of_scope", None)
 
 
-def test_a_medical_emergency_is_redirected_to_112_rather_than_held_for_an_officer() -> None:
-    # Out of scope comes first: no officer of the corporation can send an ambulance.
-    chest_pain = dataclasses.replace(NOTHING, out_of_scope=0.9, safety_hazard=0.95)
-    call, _ = dialogue(chest_pain)
-    assert call.turn("ಎದೆ ನೋವು ಆಂಬುಲೆನ್ಸ್ ಬೇಕು").keys == ("redirect",)
+@pytest.mark.parametrize(
+    ("text", "decision"),
+    [
+        ("ಎದೆ ನೋವು ಆಂಬುಲೆನ್ಸ್ ಬೇಕು", dataclasses.replace(NOTHING, safety_hazard=0.95)),
+        ("ಮ್ಯಾನ್ ಹೋಲ್ ಮುಚ್ಚಳ ಇಲ್ಲ ಆಂಬುಲೆನ್ಸ್ ಕರೆದಿದ್ದೀವಿ", dataclasses.replace(ROADS, urgency="emergency")),
+    ],
+    ids=["chest_pain", "open_manhole_and_ambulance"],
+)
+def test_a_risk_that_is_also_out_of_scope_gets_112_and_an_officer(
+    text: str, decision: Decision
+) -> None:
+    # Safety comes first: redirecting and hanging up on someone in danger is the worst mistake.
+    call, _ = dialogue(dataclasses.replace(decision, out_of_scope=0.9))
+    reply = call.turn(text)
+    assert reply.keys == ("safety_redirect",)
+    assert (reply.state, reply.reason) == (State.HANDED_OFF, "safety")
 
 
 @pytest.mark.parametrize(
@@ -139,6 +122,30 @@ def test_thresholds_are_strict_so_a_borderline_answer_is_not_acted_on() -> None:
     )
     call, _ = dialogue(borderline)
     assert call.turn("ರೋಡ್").keys == ("read_back_ward", "closing")
+
+
+def test_an_escalation_on_a_later_turn_still_hands_off() -> None:
+    call, _ = dialogue(ROADS, dataclasses.replace(ROADS, wants_human=0.9))
+    assert call.turn("ರೋಡ್ ಹಾಳಾಗಿದೆ").keys == ("ask_location",)
+    reply = call.turn("ಆಫೀಸರ್ ಜೊತೆ ಮಾತಾಡಬೇಕು")
+    assert reply.keys == ("handoff_human",)
+    assert reply.state is State.HANDED_OFF
+
+
+def test_a_failing_decider_hands_off_instead_of_going_quiet() -> None:
+    call, decider = dialogue(RuntimeError("model crashed"), ROADS_IN_W04)
+    reply = call.turn("ರೋಡ್ ಹಾಳಾಗಿದೆ")
+    assert reply.keys == ("handoff_unclear",)
+    assert (reply.state, reply.reason, reply.decision) == (State.HANDED_OFF, "decider_error", None)
+    assert call.turn("ಹಲೋ").keys == ()
+    assert len(decider.transcripts) == 1
+
+
+def test_a_decision_that_arrives_after_the_call_ended_changes_nothing() -> None:
+    call, _ = dialogue(dataclasses.replace(NOTHING, wants_human=0.9))
+    call.turn("ಆಫೀಸರ್ ಬೇಕು")
+    assert call.respond(ROADS_IN_W04).keys == ()
+    assert call.state is State.HANDED_OFF
 
 
 def test_an_unclear_problem_is_asked_about_then_handed_off() -> None:

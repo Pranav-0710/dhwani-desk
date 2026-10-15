@@ -11,7 +11,7 @@ from audio.speaker import Speaker
 from audio.tts_cache import AudioCache, CachedSpeech
 from config import Settings, get_settings
 from dialogue.decision import Decider
-from dialogue.machine import CountingDesk, Dialogue, Reply
+from dialogue.machine import CountingDesk, Dialogue, Reply, State
 from dialogue.standin import KeywordDecider
 from dialogue.templates import load_templates
 from dialogue.turns import TURN_PAUSE_S, TurnCollector
@@ -55,9 +55,12 @@ def create_tts_client(settings: Settings) -> TimbreClient:
 
 stt_stream_factory: Callable[[Settings], PrismaStream] = create_stt_stream
 tts_client_factory: Callable[[Settings], TimbreClient] = create_tts_client
-# Keyword rules until the fine-tuned Laya checkpoint is served (#15).
-decider_factory: Callable[[], Decider] = KeywordDecider
+# Keyword rules until the fine-tuned Laya checkpoint is served (#15). One per process: a model
+# behind it should load once, not on every call.
+decider: Decider = KeywordDecider()
 turn_pause_s = TURN_PAUSE_S
+# After the last line of a closed call has played, wait this long before hanging up.
+HANG_UP_GRACE_S = 0.5
 
 TEMPLATES = load_templates()
 TTS_CACHE: AudioCache = {}
@@ -100,7 +103,8 @@ async def call(websocket: WebSocket) -> None:
 
     Extra server → browser messages: `dialogue` (state, slots, ticket and the decision behind
     each reply), `agent_text`, `agent_audio_start` (`sample_rate`), binary 16-bit mono PCM
-    frames, `agent_audio_end`, and `tts_error` (the call continues).
+    frames, `agent_audio_end`, and `tts_error` (the call continues). When the agent closes the
+    call, `call_ended` (`reason`) follows its last line and the server hangs up.
     """
     await websocket.accept()
     settings = get_settings()
@@ -108,7 +112,7 @@ async def call(websocket: WebSocket) -> None:
         await _fail(websocket, "GNANI_API_KEY is not set")
         return
     outbox = Outbox(websocket)
-    dialogue = Dialogue(TEMPLATES, decider_factory(), TICKETS)
+    dialogue = Dialogue(TEMPLATES, decider, TICKETS)
     turns = TurnCollector(turn_pause_s)
     config = {
         "type": "config",
@@ -126,22 +130,38 @@ async def call(websocket: WebSocket) -> None:
         )
         speaker = Speaker(speech, outbox, settings.gnani_tts_sample_rate)
 
+        background: list[asyncio.Task[None]] = []
+
+        async def hang_up(reason: str | None) -> None:
+            await speaker.wait_until_heard()
+            await asyncio.sleep(HANG_UP_GRACE_S)
+            await outbox.json({"type": "call_ended", "reason": reason})
+            await outbox.close(1000)
+
         async def answer(reply: Reply) -> None:
             if not reply.keys:
                 return
             await outbox.json(reply.to_client(dialogue.slots))
             for line in reply.lines:
                 speaker.say(line)
+            if reply.state is State.CLOSED:
+                background.append(asyncio.create_task(hang_up(reply.reason)))
 
         async def answer_turns() -> None:
             while True:
-                text = await turns.turns.get()
-                try:
-                    # The decider may be slow (Laya on CPU); keep the event loop free.
-                    reply = await asyncio.to_thread(dialogue.turn, text)
-                except Exception:
-                    logger.exception("Deciding a caller turn failed")
+                transcript = dialogue.hear(await turns.turns.get())
+                if transcript is None:
                     continue
+                try:
+                    # Only the decision runs in a thread (the decider may be slow); the dialogue
+                    # changes here, on the event loop, so a call that ends while a decision is
+                    # running files nothing.
+                    decision = await asyncio.to_thread(dialogue.decider.decide, transcript)
+                except Exception:
+                    logger.exception("Deciding a caller turn failed; handing off")
+                    reply = dialogue.decider_failed()
+                else:
+                    reply = dialogue.respond(decision)
                 await answer(reply)
 
         async def converse(event: SttEvent) -> None:
@@ -151,12 +171,13 @@ async def call(websocket: WebSocket) -> None:
             elif event.type == "transcript":
                 turns.add(event.text)
 
-        answering = asyncio.create_task(answer_turns())
+        background.append(asyncio.create_task(answer_turns()))
         try:
             final = await _stt_session(websocket, settings, outbox, config, converse)
         finally:
-            answering.cancel()
-            await asyncio.gather(answering, return_exceptions=True)
+            for task in background:
+                task.cancel()
+            await asyncio.gather(*background, return_exceptions=True)
             await turns.aclose()
             await speaker.aclose()
     if final:

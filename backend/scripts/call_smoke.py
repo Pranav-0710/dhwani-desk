@@ -55,7 +55,7 @@ async def call(url: str, lines: list[str]) -> None:
     def log(text: str) -> None:
         print(f"{time.monotonic() - started:6.2f}s  {text}", flush=True)
 
-    expected_ends, ends, replies, state = 0, 0, 0, "listening"
+    expected_ends, ends, replies, state, hung_up = 0, 0, 0, "listening", False
     caller_done_at: float | None = None
     talk: asyncio.Queue[bytes] = asyncio.Queue()
 
@@ -74,7 +74,7 @@ async def call(url: str, lines: list[str]) -> None:
                 await asyncio.sleep(0.1)
 
         async def listen() -> None:
-            nonlocal expected_ends, ends, replies, state
+            nonlocal expected_ends, ends, replies, state, hung_up
             first_audio_logged = True
             async for message in socket:
                 if isinstance(message, bytes):
@@ -105,6 +105,9 @@ async def call(url: str, lines: list[str]) -> None:
                     log(f"agent: {event['text']}")
                 elif kind == "agent_audio_end":
                     ends += 1
+                elif kind == "call_ended":
+                    hung_up = True
+                    log(f"the agent hung up ({event['reason']})")
                 elif kind in ("tts_error", "error", "closed"):
                     log(f"{kind}: {event}")
 
@@ -128,6 +131,8 @@ async def call(url: str, lines: list[str]) -> None:
             caller_done_at = time.monotonic() + len(pcm) / (rate * 2)
             await until(lambda before=before: replies > before, "the agent's answer")
             await until(lambda: ends >= expected_ends, "the agent to finish speaking")
+        if state == "closed":
+            await until(lambda: hung_up, "the agent to hang up")
         log(f"call ends in state {state}")
         mic.cancel()
         listener.cancel()

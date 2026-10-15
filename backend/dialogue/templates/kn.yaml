@@ -35,6 +35,10 @@ lines:
   # This is dangerous, please stay away from that spot. I am connecting you to an officer now.
   safety: "ಇದು ಅಪಾಯಕಾರಿ, ದಯವಿಟ್ಟು ಆ ಜಾಗದಿಂದ ದೂರ ಇರಿ. ನಿಮ್ಮನ್ನು ಈಗಲೇ ಅಧಿಕಾರಿಗೆ ಸಂಪರ್ಕಿಸುತ್ತಿದ್ದೇನೆ."
 
+  # This is dangerous. If anyone is hurt or in danger, call one one two (112) right now.
+  # I am connecting you to an officer. (A risk the corporation cannot handle: chest pain, a fight.)
+  safety_redirect: "ಇದು ಅಪಾಯಕಾರಿ. ಯಾರಿಗಾದರೂ ಗಾಯ ಆಗಿದ್ದರೆ ಅಥವಾ ಜೀವಕ್ಕೆ ಅಪಾಯ ಇದ್ದರೆ ಈಗಲೇ ಒಂದು ಒಂದು ಎರಡು ಸಂಖ್ಯೆಗೆ ಕರೆ ಮಾಡಿ. ನಿಮ್ಮನ್ನು ಅಧಿಕಾರಿಗೆ ಸಂಪರ್ಕಿಸುತ್ತಿದ್ದೇನೆ."
+
   # Certainly. I am connecting you to an officer, please stay on the line.
   handoff_human: "ಖಂಡಿತ. ನಿಮ್ಮನ್ನು ಅಧಿಕಾರಿಗೆ ಸಂಪರ್ಕಿಸುತ್ತಿದ್ದೇನೆ, ದಯವಿಟ್ಟು ಲೈನ್‌ನಲ್ಲಿ ಇರಿ."
 

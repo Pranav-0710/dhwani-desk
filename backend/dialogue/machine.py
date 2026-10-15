@@ -1,15 +1,17 @@
 """The call as a deterministic state machine: no language model chooses what the agent says.
 
 greet → listen → decide on everything the caller has said so far → one of:
-- redirect (not a civic complaint) and close, with no ticket
 - hand off to an officer (safety risk, emergency, caller asks for a person, caller distressed
-  or abusive, or the complaint still cannot be routed)
+  or abusive, the complaint still cannot be routed, or the decider failed)
+- redirect (not a civic complaint) and close, with no ticket
 - ask for what is missing (the problem, the location, the ward) and listen again
 - read back the ticket number and close
 
-Escalation comes before everything else, in the order of the PRD's table.
+Escalation comes first, in the order of the PRD's table: a safety risk wins over everything,
+including "not a civic complaint", because a wrong redirect could leave someone hurt.
 """
 
+import logging
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from itertools import count
@@ -18,6 +20,8 @@ from typing import Any, Protocol
 from dialogue.decision import Decider, Decision
 from dialogue.templates import Templates
 
+logger = logging.getLogger("dhwani.dialogue")
+
 # Thresholds from docs/PRD.md ("Escalation and safety rules", v1); they are tuned on the test
 # set later. A shared contract: the console and the eval harness read the same numbers.
 OUT_OF_SCOPE = 0.7
@@ -25,6 +29,7 @@ SAFETY_HAZARD = 0.6
 WANTS_HUMAN = 0.7
 DEPARTMENT_CONFIDENCE = 0.6
 HAS_LOCATION = 0.5
+REPEAT_COMPLAINT = 0.5
 HAND_OFF_STATES = ("distressed", "abusive")
 # Turns without a confident department before handing off (PRD: "after 2 turns").
 MAX_UNROUTED_TURNS = 2
@@ -109,22 +114,49 @@ class Dialogue:
         return self._reply(("greeting",))
 
     def turn(self, text: str) -> Reply:
-        """Decide on one caller turn. Once the call is handed off or closed, say nothing."""
-        if self.state is not State.LISTENING or not text.strip():
+        """Hear and decide one caller turn in one step. The call route does the same in two
+        steps (`hear`, then `respond`) so the decision can run off the event loop."""
+        transcript = self.hear(text)
+        if transcript is None:
             return self._reply(())
+        try:
+            decision = self.decider.decide(transcript)
+        except Exception:
+            logger.exception("The decider failed; handing the call to an officer")
+            return self.decider_failed()
+        return self.respond(decision)
+
+    def hear(self, text: str) -> str | None:
+        """Add a caller turn. Returns everything the caller has said, for the decider, or None
+        when there is nothing to decide (blank turn, or the call is handed off or closed)."""
+        if self.state is not State.LISTENING or not text.strip():
+            return None
         self.turns.append(text.strip())
-        decision = self.decider.decide(" ".join(self.turns))
+        return " ".join(self.turns)
+
+    def decider_failed(self) -> Reply:
+        """Hand off rather than go quiet: the decider reads the whole call, so if it failed on
+        this transcript it would most likely fail on every longer one too."""
+        return self._end(State.HANDED_OFF, ("handoff_unclear",), "decider_error", None)
+
+    def respond(self, decision: Decision) -> Reply:
+        """The agent's answer to a decision on everything the caller has said so far."""
+        if self.state is not State.LISTENING:
+            return self._reply(())
         # Before any hand-off, so the officer who takes over sees what is already known.
         self._remember(decision)
 
-        if decision.out_of_scope > OUT_OF_SCOPE:
-            return self._end(State.CLOSED, ("redirect",), "out_of_scope", decision)
         if decision.safety_hazard > SAFETY_HAZARD or decision.urgency == "emergency":
-            return self._end(State.HANDED_OFF, ("safety",), "safety", decision)
+            # A risk outside the corporation's remit (chest pain, a fight) still gets an
+            # officer, and the caller is told to call 112 at once.
+            key = "safety_redirect" if decision.out_of_scope > OUT_OF_SCOPE else "safety"
+            return self._end(State.HANDED_OFF, (key,), "safety", decision)
         if decision.wants_human > WANTS_HUMAN:
             return self._end(State.HANDED_OFF, ("handoff_human",), "wants_human", decision)
         if decision.caller_state in HAND_OFF_STATES:
             return self._end(State.HANDED_OFF, ("handoff_calm",), decision.caller_state, decision)
+        if decision.out_of_scope > OUT_OF_SCOPE:
+            return self._end(State.CLOSED, ("redirect",), "out_of_scope", decision)
 
         opening = self._opening(decision)
         if self.slots.department is None:
@@ -165,7 +197,7 @@ class Dialogue:
     def _close_with_ticket(self, opening: tuple[str, ...], decision: Decision) -> Reply:
         department = self.slots.department
         assert department is not None
-        repeat = decision.repeat_complaint > 0.5
+        repeat = decision.repeat_complaint > REPEAT_COMPLAINT
         ticket = Ticket(
             number=self.desk.next_number(),
             department=department,
@@ -182,7 +214,9 @@ class Dialogue:
         self.state = State.CLOSED
         return self._reply(keys, reason="ticket", ticket=ticket, decision=decision)
 
-    def _end(self, state: State, keys: tuple[str, ...], reason: str, decision: Decision) -> Reply:
+    def _end(
+        self, state: State, keys: tuple[str, ...], reason: str, decision: Decision | None
+    ) -> Reply:
         self.state = state
         return self._reply(keys, reason=reason, decision=decision)
 

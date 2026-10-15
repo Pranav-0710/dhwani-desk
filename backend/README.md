@@ -76,10 +76,12 @@ Why Saanvi: `docs/decisions/tts-voice.md`.
 Everything `/ws/stt` does, plus the agent. It greets the caller once Prisma is connected, then answers every caller turn. A turn is the transcript segments that arrive less than 0.6 s apart (`dialogue/turns.py`).
 
 What the agent says comes from the state machine in `dialogue/machine.py`. It is greet → listen → decide → one of these:
+- hand off to an officer: a safety risk, the caller asks for a person, the caller is distressed or abusive, the complaint can't be routed, or the decider failed
 - redirect a non-civic request and close
-- hand off to an officer
 - ask for what is missing
 - read back the ticket number and close
+
+A safety risk wins over everything. A risk outside the corporation's remit, such as chest pain or a fight, gets "call 112" and an officer, not a redirect.
 
 The lines are in `dialogue/templates/kn.yaml`. Until Laya is served (#15), the decisions come from keyword rules in `dialogue/standin.py`. Fixed lines are synthesised once per process and replayed from memory (`audio/tts_cache.py`).
 
@@ -97,6 +99,8 @@ Then, per agent line, in order:
 2. `agent_audio_start` (`sample_rate`, from `GNANI_TTS_SAMPLE_RATE`)
 3. binary frames of 16-bit mono PCM (whole samples)
 4. `agent_audio_end`
+
+When the agent closes the call (ticket filed or request redirected), the server waits until the browser has played the last line, sends `call_ended` (`reason`), and closes the socket with 1000. A handed-off call stays open for the officer.
 
 A Timbre failure sends `tts_error` (`message`) before `agent_audio_end`; the call continues. Every `agent_audio_start` is followed by an `agent_audio_end`, because the phone page mutes its mic in between. When the call ends (browser leaves, or Prisma closes or fails), a line being spoken is cut off and queued lines are dropped. `config` also carries `tts_sample_rate`.
 
