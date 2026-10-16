@@ -27,8 +27,7 @@ class Speaker:
     the browser mutes its mic between start and end. A failure also sends `tts_error`; the
     call carries on with the next line. Lines still queued when the call ends are dropped.
 
-    The queue is unbounded: the echo agent says one line per transcript segment. The
-    dialogue layer (#9) should keep it to one reply per caller turn.
+    The queue is unbounded; the dialogue queues one reply (a few lines) per caller turn.
     """
 
     def __init__(self, tts: SpeechStream, outbox: Outbox, sample_rate: int) -> None:
@@ -36,10 +35,20 @@ class Speaker:
         self._outbox = outbox
         self._sample_rate = sample_rate
         self._lines: asyncio.Queue[str] = asyncio.Queue()
+        # Event-loop time by which the browser will have played everything sent so far: it
+        # plays chunks back to back from the first one's arrival, and Timbre sends faster
+        # than real time, so the audio is still playing after the last chunk has gone.
+        self._heard_by = 0.0
         self._worker = asyncio.create_task(self._run())
 
     def say(self, text: str) -> None:
         self._lines.put_nowait(text)
+
+    async def wait_until_heard(self) -> None:
+        """Return once every queued line has been sent and should have finished playing."""
+        await self._lines.join()
+        loop = asyncio.get_running_loop()
+        await asyncio.sleep(max(0.0, self._heard_by - loop.time()))
 
     async def aclose(self) -> None:
         self._worker.cancel()
@@ -55,6 +64,8 @@ class Speaker:
                 return
             except Exception:
                 logger.exception("Speaking a line failed; continuing with the next one")
+            finally:
+                self._lines.task_done()
 
     async def _speak(self, text: str) -> None:
         await self._outbox.json({"type": "agent_text", "text": text})
@@ -64,6 +75,7 @@ class Speaker:
                 async with contextlib.aclosing(self._tts.stream(text)) as chunks:
                     async for pcm in chunks:
                         await self._outbox.audio(pcm)
+                        self._played(pcm)
         except asyncio.CancelledError:
             raise
         except (TimbreError, TimeoutError) as exc:
@@ -73,3 +85,7 @@ class Speaker:
             logger.exception("Unexpected TTS failure")
             await self._outbox.json({"type": "tts_error", "message": type(exc).__name__})
         await self._outbox.json({"type": "agent_audio_end"})
+
+    def _played(self, pcm: bytes) -> None:
+        now = asyncio.get_running_loop().time()
+        self._heard_by = max(now, self._heard_by) + len(pcm) / (2 * self._sample_rate)
