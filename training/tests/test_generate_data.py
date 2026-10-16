@@ -256,39 +256,121 @@ def test_parse_choice(reply: str, expected: int | None) -> None:
     assert gd.parse_choice(reply) == expected
 
 
-def test_generation_keeps_only_rows_whose_meaning_check_picks_their_scenario(monkeypatch) -> None:
-    """The loop end to end with a fake model: odd sentences fail the meaning check."""
-    scenario = gd.TEMPLATES["scenarios"]["water"][0]["en"]
-    specs = []
-    for i in range(1, 7):
-        spec = spec_for()
-        specs.append({"id": f"gen-{i:05d}", "scenario": scenario, **spec})
-    written = iter(range(1, 1000))
+class FakeModel:
+    """Stands in for the language model. Every sentence it writes ends in a running number,
+    and its meaning check fails exactly the sentences with an odd number."""
 
-    def fake_complete(model, tokenizer, conversations, temperature, max_new_tokens):
+    scenario = gd.TEMPLATES["scenarios"]["water"][0]["en"]
+
+    def __init__(self, monkeypatch) -> None:
+        self.written = 0
+        monkeypatch.setattr(gd, "load_model", lambda name, four_bit: (None, None))
+        monkeypatch.setattr(gd, "complete", self.complete)
+
+    def specs(self, count: int) -> list[dict]:
+        return [
+            {"id": f"gen-{i:05d}", "scenario": self.scenario, **spec_for()}
+            for i in range(1, count + 1)
+        ]
+
+    def complete(self, model, tokenizer, conversations, temperature, max_new_tokens):
         replies = []
         for messages in conversations:
             user = messages[-1]["content"]
             if messages[0]["content"] == gd.CHECK_SYSTEM:
                 text = user.split("\n\n")[1]
                 options = dict(re.findall(r"^(\d+)\. (.*)$", user, re.M))
-                right = next(number for number, option in options.items() if option == scenario)
-                odd = int(text.split()[-1]) % 2
-                replies.append(str(len(options)) if odd else right)
+                right = next(n for n, option in options.items() if option == self.scenario)
+                replies.append(str(len(options)) if int(text.split()[-1]) % 2 else right)
             else:
-                n = next(written)
-                replies.append(json.dumps({"text": f"ನೀರು ಬಂದಿಲ್ಲ ಮೂರು ದಿನ ಆಯ್ತು {n}", "gloss": "x"}))
+                self.written += 1
+                text = f"ನೀರು ಬಂದಿಲ್ಲ ಮೂರು ದಿನ ಆಯ್ತು {self.written}"
+                replies.append(json.dumps({"text": text, "gloss": "x"}))
         return replies
 
-    monkeypatch.setattr(gd, "load_model", lambda name, four_bit: (None, None))
-    monkeypatch.setattr(gd, "complete", fake_complete)
-    accepted, rejected = gd.generate(specs, "fake", 4, 1, 0.9, False, 0)
 
-    assert [row["text"].split()[-1] for row in accepted] == ["2", "4", "6"]
+def last_number(row: dict) -> str:
+    return row["text"].split()[-1]
+
+
+def test_generation_keeps_only_rows_whose_meaning_check_picks_their_scenario(monkeypatch) -> None:
+    model = FakeModel(monkeypatch)
+    accepted, rejected, finished = gd.generate(model.specs(6), "fake", 4, 1, 0.9, False, 0)
+
+    assert finished
+    assert [last_number(row) for row in accepted] == ["2", "4", "6"]
     assert all(row["meta"]["meaning_check"] for row in accepted)
     assert [row["reasons"] for row in rejected] == [["meaning_check_failed"]] * 3
     assert all(row["picked"] == gd.NONE_OF_THESE for row in rejected)
 
-    written = iter(range(1, 1000))
-    accepted, rejected = gd.generate(specs, "fake", 4, 1, 0.9, False, 0, meaning_check=False)
+    accepted, rejected, _ = gd.generate(
+        FakeModel(monkeypatch).specs(6), "fake", 4, 1, 0.9, False, 0, meaning_check=False
+    )
     assert len(accepted) == 6 and not rejected
+
+
+def test_each_spec_gets_its_own_attempts(monkeypatch) -> None:
+    # Specs 1, 3, 5 write sentences 1, 3, 5 and fail; on retry they write 7, 8, 9, so spec 3
+    # passes on its 2nd try; then 10, 11: spec 1 passes on its 3rd, spec 5 runs out.
+    model = FakeModel(monkeypatch)
+    accepted, rejected, finished = gd.generate(model.specs(6), "fake", 4, 3, 0.9, False, 0)
+
+    assert finished
+    attempts = {row["id"]: row["meta"]["attempt"] for row in accepted}
+    assert attempts == {
+        "gen-00001": 3,
+        "gen-00002": 1,
+        "gen-00003": 2,
+        "gen-00004": 1,
+        "gen-00006": 1,
+    }
+    assert [row["attempt"] for row in rejected if row["id"] == "gen-00005"] == [1, 2, 3]
+
+
+def test_a_run_saves_checkpoints_and_stops_at_its_deadline(monkeypatch) -> None:
+    model = FakeModel(monkeypatch)
+    saved: list[tuple[int, int]] = []
+    accepted, rejected, finished = gd.generate(
+        model.specs(6),
+        "fake",
+        2,
+        1,
+        0.9,
+        False,
+        0,
+        checkpoint=lambda kept, failed: saved.append((len(kept), len(failed))),
+        checkpoint_every=1,
+        deadline=0.0,  # already passed: stop after the first batch
+    )
+    assert not finished
+    assert (len(accepted), len(rejected)) == (1, 1)
+    assert saved == [(1, 1)]
+
+
+def test_a_resumed_run_skips_kept_specs_and_counts_earlier_failures(monkeypatch) -> None:
+    model = FakeModel(monkeypatch)
+    model.written = 1  # continue the numbering as if sentence 1 had been written before
+    kept = [{"id": "gen-00002", "text": "ನೀರು ಬಂದಿಲ್ಲ ಹಳೆಯದು", "labels": {}, "meta": {}}]
+    failed = [gd.rejection({"id": "gen-00001"}, n, ["meaning_check_failed"], "") for n in (1, 2)]
+
+    accepted, rejected, finished = gd.generate(
+        model.specs(2), "fake", 4, 3, 0.9, False, 0, previous=(kept, failed)
+    )
+
+    # Only spec 1 is asked for again, and only once: it had used two of its three attempts.
+    assert model.written == 2
+    assert finished
+    assert {row["id"] for row in accepted} == {"gen-00001", "gen-00002"}
+    assert next(r for r in accepted if r["id"] == "gen-00001")["meta"]["attempt"] == 3
+
+
+def test_a_checkpoint_round_trips_and_refuses_a_different_run(tmp_path) -> None:
+    run = {"n": 6, "seed": 0, "model": "fake", "attempts": 3, "meaning_check": True}
+    kept = [{"id": "gen-00002", "text": "ನೀರು", "labels": {}, "meta": {}}]
+    failed = [gd.rejection({"id": "gen-00001"}, 1, ["unparseable"], "x")]
+
+    assert gd.load_checkpoint(tmp_path, run, None) == ([], [])
+    gd.save_checkpoint(tmp_path, run, kept, failed, None)
+    assert gd.load_checkpoint(tmp_path, run, None) == (kept, failed)
+    with pytest.raises(SystemExit):
+        gd.load_checkpoint(tmp_path, run | {"n": 3000}, None)

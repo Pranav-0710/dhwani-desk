@@ -21,9 +21,10 @@ import json
 import os
 import random
 import re
+import time
 import unicodedata
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -479,6 +480,10 @@ def rejection(
     return {"id": spec["id"], "attempt": attempt, "reasons": reasons, "reply": reply} | extra
 
 
+Rows = list[dict[str, Any]]
+Checkpoint = Callable[[Rows, Rows], None]
+
+
 def generate(
     specs: list[dict[str, Any]],
     model_name: str,
@@ -488,22 +493,43 @@ def generate(
     four_bit: bool,
     seed: int,
     meaning_check: bool = True,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Rows that passed every check, and every failed attempt with its reasons.
+    *,
+    previous: tuple[Rows, Rows] = ([], []),
+    checkpoint: Checkpoint | None = None,
+    checkpoint_every: int = 10,
+    deadline: float | None = None,
+) -> tuple[Rows, Rows, bool]:
+    """Rows that passed every check, every failed attempt with its reasons, and whether the
+    run finished (False when it stopped at `deadline`, a `time.monotonic()` value).
 
     With `meaning_check`, a sentence that passes the text checks is shown back to the model
     without the request, and kept only if the model picks the scenario it was written for.
     That drops sentences that are well-formed but say something else (a light that is "on"
     instead of "off", a wrong word for the animal), which the text checks cannot see.
+
+    `previous` continues an earlier run of the same specs: kept specs are skipped and failed
+    attempts count against `attempts`. `checkpoint` receives the rows so far every
+    `checkpoint_every` batches and when the run stops at the deadline.
     """
     model, tokenizer = load_model(model_name, four_bit)
     rng = random.Random(seed)
-    seen = {dedup_key(row["text"]) for row in SEED}
-    accepted: list[dict[str, Any]] = []
-    rejected: list[dict[str, Any]] = []
-    pending = specs
-    for attempt in range(1, attempts + 1):
-        retry = []
+    accepted, rejected = list(previous[0]), list(previous[1])
+    kept_ids = {row["id"] for row in accepted}
+    seen = {dedup_key(row["text"]) for row in [*SEED, *accepted]}
+    tries = Counter(row["id"] for row in rejected)
+    pending = [s for s in specs if s["id"] not in kept_ids and tries[s["id"]] < attempts]
+    retry: list[dict[str, Any]] = []
+
+    def fail(spec: dict[str, Any], reasons: list[str], reply: str, **extra: Any) -> None:
+        tries[spec["id"]] += 1
+        rejected.append(rejection(spec, tries[spec["id"]], reasons, reply, **extra))
+        if tries[spec["id"]] < attempts:
+            retry.append(spec)
+
+    batches, round_number = 0, 0
+    while pending:
+        round_number += 1
+        retry.clear()
         for batch in chunks(pending, batch_size):
             replies = complete(
                 model,
@@ -517,8 +543,7 @@ def generate(
                 parsed = parse_reply(reply)
                 reasons = problems(parsed["text"], spec) if parsed else ["unparseable"]
                 if reasons:
-                    rejected.append(rejection(spec, attempt, reasons, reply))
-                    retry.append(spec)
+                    fail(spec, reasons, reply)
                 else:
                     candidates.append((spec, parsed, reply))
 
@@ -537,10 +562,11 @@ def generate(
                         verdicts[index] = options[picked - 1] if valid else answer.strip()
 
             for (spec, parsed, reply), picked in zip(candidates, verdicts, strict=True):
-                if picked is not None or dedup_key(parsed["text"]) in seen:
-                    reasons = ["meaning_check_failed"] if picked is not None else ["duplicate"]
-                    rejected.append(rejection(spec, attempt, reasons, reply, picked=picked))
-                    retry.append(spec)
+                if picked is not None:
+                    fail(spec, ["meaning_check_failed"], reply, picked=picked)
+                    continue
+                if dedup_key(parsed["text"]) in seen:
+                    fail(spec, ["duplicate"], reply)
                     continue
                 seen.add(dedup_key(parsed["text"]))
                 accepted.append(
@@ -552,17 +578,21 @@ def generate(
                             "scenario": spec["scenario"],
                             "location_form": spec["location"]["form"],
                             "model": model_name,
-                            "attempt": attempt,
+                            "attempt": tries[spec["id"]] + 1,
                             "meaning_check": meaning_check,
                         },
                     }
                 )
-            print(f"attempt {attempt}: {len(accepted)} kept, {len(retry)} to retry", flush=True)
-        pending = retry
-        if not pending:
-            break
+            batches += 1
+            print(f"round {round_number}: {len(accepted)} kept, {len(retry)} to retry", flush=True)
+            out_of_time = deadline is not None and time.monotonic() > deadline
+            if checkpoint and (out_of_time or batches % checkpoint_every == 0):
+                checkpoint(accepted, rejected)
+            if out_of_time:
+                return accepted, rejected, False
+        pending = list(retry)
     accepted.sort(key=lambda row: row["id"])
-    return accepted, rejected
+    return accepted, rejected, True
 
 
 # --- report and output -------------------------------------------------------------------
@@ -643,22 +673,31 @@ def dataset_card(model_name: str, summary: dict[str, Any]) -> str:
     )
 
 
+def write_jsonl(path: Path, rows: Rows) -> None:
+    lines = (json.dumps(row, ensure_ascii=False) for row in rows)
+    path.write_text("".join(f"{line}\n" for line in lines), "utf-8")
+
+
+def read_jsonl(path: Path) -> Rows:
+    return [json.loads(line) for line in path.read_text("utf-8").splitlines() if line.strip()]
+
+
 def write_output(
     out: Path,
     model_name: str,
-    accepted: list[dict[str, Any]],
-    rejected: list[dict[str, Any]],
+    accepted: Rows,
+    rejected: Rows,
     summary: dict[str, Any],
 ) -> None:
     out.mkdir(parents=True, exist_ok=True)
-    for name, rows in (("train.jsonl", accepted), ("rejected.jsonl", rejected)):
-        lines = (json.dumps(row, ensure_ascii=False) for row in rows)
-        (out / name).write_text("".join(f"{line}\n" for line in lines), "utf-8")
+    write_jsonl(out / "train.jsonl", accepted)
+    write_jsonl(out / "rejected.jsonl", rejected)
     (out / "report.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), "utf-8")
     (out / "README.md").write_text(dataset_card(model_name, summary), "utf-8")
 
 
-def push(out: Path, repo: str, message: str) -> None:
+def hub(repo: str) -> Any:
+    """A Hub client for `repo`, which is created private if missing and refused if public."""
     from huggingface_hub import HfApi
 
     api = HfApi(token=os.environ["HF_TOKEN"])
@@ -666,7 +705,73 @@ def push(out: Path, repo: str, message: str) -> None:
     # create_repo leaves an existing repo as it is, so a public one would stay public.
     if not api.repo_info(repo, repo_type="dataset").private:
         raise SystemExit(f"{repo} is public; make it private before uploading")
-    api.upload_folder(folder_path=out, repo_id=repo, repo_type="dataset", commit_message=message)
+    return api
+
+
+# Progress of an unfinished run, under out/ and (with --push-repo) in the dataset repo, so a
+# run cut off by Kaggle's 12-hour limit or a restart continues with --resume.
+CHECKPOINT = "checkpoint"
+
+
+def save_checkpoint(
+    out: Path, run: dict[str, Any], accepted: Rows, rejected: Rows, repo: str | None
+) -> None:
+    folder = out / CHECKPOINT
+    folder.mkdir(parents=True, exist_ok=True)
+    write_jsonl(folder / "train.jsonl", accepted)
+    write_jsonl(folder / "rejected.jsonl", rejected)
+    (folder / "run.json").write_text(json.dumps(run), "utf-8")
+    if repo:
+        hub(repo).upload_folder(
+            folder_path=folder,
+            path_in_repo=CHECKPOINT,
+            repo_id=repo,
+            repo_type="dataset",
+            commit_message=f"checkpoint: {len(accepted)} rows kept",
+        )
+    print(f"checkpoint saved: {len(accepted)} kept", flush=True)
+
+
+def load_checkpoint(out: Path, run: dict[str, Any], repo: str | None) -> tuple[Rows, Rows]:
+    """The rows of an earlier run with the same settings: from out/, else from the repo."""
+    folder = out / CHECKPOINT
+    if not (folder / "run.json").exists() and repo:
+        from huggingface_hub import hf_hub_download
+
+        api = hub(repo)
+        if api.file_exists(repo, f"{CHECKPOINT}/run.json", repo_type="dataset"):
+            for name in ("run.json", "train.jsonl", "rejected.jsonl"):
+                hf_hub_download(
+                    repo,
+                    f"{CHECKPOINT}/{name}",
+                    repo_type="dataset",
+                    local_dir=out,
+                    token=os.environ["HF_TOKEN"],
+                )
+    if not (folder / "run.json").exists():
+        return [], []
+    saved = json.loads((folder / "run.json").read_text("utf-8"))
+    if saved != run:
+        raise SystemExit(
+            f"The checkpoint is from a different run ({saved}); "
+            "run with the same settings, or delete the checkpoint to start over."
+        )
+    return read_jsonl(folder / "train.jsonl"), read_jsonl(folder / "rejected.jsonl")
+
+
+def push(out: Path, repo: str, message: str) -> None:
+    api = hub(repo)
+    api.upload_folder(
+        folder_path=out,
+        repo_id=repo,
+        repo_type="dataset",
+        commit_message=message,
+        ignore_patterns=[f"{CHECKPOINT}/*"],
+    )
+    if api.file_exists(repo, f"{CHECKPOINT}/run.json", repo_type="dataset"):
+        api.delete_folder(
+            CHECKPOINT, repo_id=repo, repo_type="dataset", commit_message="run finished"
+        )
 
 
 def main() -> None:
@@ -687,6 +792,15 @@ def main() -> None:
         action="store_false",
         help="keep sentences without asking the model which scenario they describe",
     )
+    parser.add_argument(
+        "--resume", action="store_true", help="continue from a checkpoint of the same run"
+    )
+    parser.add_argument(
+        "--max-hours", type=float, help="save a checkpoint and stop after this long"
+    )
+    parser.add_argument(
+        "--checkpoint-every", type=int, default=10, help="batches between checkpoints"
+    )
     args = parser.parse_args()
 
     specs = sample_specs(args.n, args.seed)
@@ -697,7 +811,22 @@ def main() -> None:
             print(build_messages(spec, rng)[1]["content"], end="\n\n")
         return
 
-    accepted, rejected = generate(
+    # What makes two runs the same run: a checkpoint is only resumed under these settings.
+    run = {
+        "n": args.n,
+        "seed": args.seed,
+        "model": args.model,
+        "attempts": args.attempts,
+        "meaning_check": args.meaning_check,
+    }
+    previous = load_checkpoint(args.out, run, args.push_repo) if args.resume else ([], [])
+    if previous[0] or previous[1]:
+        print(f"resuming: {len(previous[0])} kept, {len(previous[1])} failed attempts", flush=True)
+
+    def checkpoint(accepted: Rows, rejected: Rows) -> None:
+        save_checkpoint(args.out, run, accepted, rejected, args.push_repo)
+
+    accepted, rejected, finished = generate(
         specs,
         args.model,
         args.batch_size,
@@ -706,7 +835,18 @@ def main() -> None:
         args.four_bit,
         args.seed,
         args.meaning_check,
+        previous=previous,
+        checkpoint=checkpoint,
+        checkpoint_every=args.checkpoint_every,
+        deadline=time.monotonic() + args.max_hours * 3600 if args.max_hours else None,
     )
+    if not finished:
+        print(
+            f"Stopped at the {args.max_hours} h limit with {len(accepted)} kept. "
+            "Run again with --resume (and the same settings) to continue.",
+            flush=True,
+        )
+        return
     summary = {
         "model": args.model,
         "seed": args.seed,
