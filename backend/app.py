@@ -131,12 +131,15 @@ async def call(websocket: WebSocket) -> None:
         speaker = Speaker(speech, outbox, settings.gnani_tts_sample_rate)
 
         background: list[asyncio.Task[None]] = []
+        agent_hung_up = asyncio.Event()
 
         async def hang_up(reason: str | None) -> None:
             await speaker.wait_until_heard()
             await asyncio.sleep(HANG_UP_GRACE_S)
             await outbox.json({"type": "call_ended", "reason": reason})
-            await outbox.close(1000)
+            # Stops the relay, which closes Prisma; the socket is closed once that is done, so
+            # a late Prisma event is never sent down a closed socket.
+            agent_hung_up.set()
 
         async def answer(reply: Reply) -> None:
             if not reply.keys:
@@ -165,6 +168,8 @@ async def call(websocket: WebSocket) -> None:
                 await answer(reply)
 
         async def converse(event: SttEvent) -> None:
+            if agent_hung_up.is_set():
+                return  # nothing follows call_ended
             await outbox.json(event.to_client())
             if event.type == "connected":
                 await answer(dialogue.greet())
@@ -173,7 +178,9 @@ async def call(websocket: WebSocket) -> None:
 
         background.append(asyncio.create_task(answer_turns()))
         try:
-            final = await _stt_session(websocket, settings, outbox, config, converse)
+            final = await _stt_session(
+                websocket, settings, outbox, config, converse, stop=agent_hung_up
+            )
         finally:
             for task in background:
                 task.cancel()
@@ -182,6 +189,9 @@ async def call(websocket: WebSocket) -> None:
             await speaker.aclose()
     if final:
         await _send_and_close(websocket, *final)
+    elif agent_hung_up.is_set():
+        with contextlib.suppress(RuntimeError, WebSocketDisconnect):
+            await websocket.close(code=1000)
 
 
 async def _stt_session(
@@ -190,14 +200,15 @@ async def _stt_session(
     outbox: Outbox,
     config: dict[str, Any],
     on_event: EventHandler,
+    stop: asyncio.Event | None = None,
 ) -> FinalMessage | None:
     """Run one Prisma session for this socket. Returns the message to end the session with,
-    or None when the browser left (nobody to tell)."""
+    or None when the browser left or `stop` was set (the caller has nothing more to send)."""
     try:
         async with stt_stream_factory(settings) as stream:
             await outbox.json(config)
-            ended_by = await _relay(websocket, stream, on_event)
-            if ended_by == "browser":
+            ended_by = await _relay(websocket, stream, on_event, stop)
+            if ended_by in ("browser", "agent"):
                 stream.discard_pending()
                 return None
         closed = {
@@ -214,8 +225,14 @@ async def _stt_session(
         return None
 
 
-async def _relay(websocket: WebSocket, stream: PrismaStream, on_event: EventHandler) -> str:
-    """Pump audio up and events down until one side ends; returns which side ended."""
+async def _relay(
+    websocket: WebSocket,
+    stream: PrismaStream,
+    on_event: EventHandler,
+    stop: asyncio.Event | None = None,
+) -> str:
+    """Pump audio up and events down until one side ends or `stop` is set; returns "browser",
+    "prisma" or "agent"."""
 
     async def pump_audio() -> None:
         while True:
@@ -233,15 +250,19 @@ async def _relay(websocket: WebSocket, stream: PrismaStream, on_event: EventHand
 
     audio = asyncio.create_task(pump_audio())
     events = asyncio.create_task(pump_events())
+    stopped = asyncio.create_task((stop or asyncio.Event()).wait())
+    tasks = (audio, events, stopped)
     try:
-        done, _ = await asyncio.wait({audio, events}, return_when=asyncio.FIRST_COMPLETED)
+        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
             task.result()
-        return "browser" if audio in done else "prisma"
+        if audio in done:
+            return "browser"
+        return "prisma" if events in done else "agent"
     finally:
-        for task in (audio, events):
+        for task in tasks:
             task.cancel()
-        await asyncio.gather(audio, events, return_exceptions=True)
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def _send_and_close(websocket: WebSocket, payload: dict[str, Any], code: int) -> None:

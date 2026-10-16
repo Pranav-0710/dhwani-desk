@@ -19,7 +19,3 @@ class Outbox:
     async def audio(self, pcm: bytes) -> None:
         async with self._lock:
             await self._websocket.send_bytes(pcm)
-
-    async def close(self, code: int = 1000) -> None:
-        async with self._lock:
-            await self._websocket.close(code=code)

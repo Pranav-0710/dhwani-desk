@@ -34,6 +34,11 @@ class Decision:
 
 
 class Decider(Protocol):
-    """Decides on the caller's words so far: every caller turn, joined in order."""
+    """Decides on the caller's words so far: every caller turn, joined in order.
+
+    One decider serves every call in the process, and `decide` runs in worker threads, so it
+    must be safe to call from several threads at once. A decision abandoned when its call ends
+    still runs to completion, so keep it bounded (#15: cap the transcript length for Laya).
+    """
 
     def decide(self, transcript: str) -> Decision: ...

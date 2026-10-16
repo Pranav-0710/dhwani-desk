@@ -9,6 +9,7 @@ import app as app_module
 from audio.speaker import Speaker
 from dialogue.echo import ECHO_PREFIX, EchoAgent
 from dialogue.machine import CountingDesk
+from gnani.prisma import SttEvent
 from gnani.timbre import TimbreError
 
 
@@ -153,6 +154,25 @@ def test_a_whole_call_ends_with_a_ticket(monkeypatch: pytest.MonkeyPatch) -> Non
     assert closing["keys"] == ["read_back_ward", "closing"]
     assert (closing["state"], closing["ticket"]["ward"]) == ("closed", "w04")
     # The agent hangs up once its last line has been heard.
+    assert browser.sent[-1] == {"type": "call_ended", "reason": "ticket"}
+    assert browser.closed_with == 1000
+
+
+def test_a_late_prisma_event_during_the_hang_up_is_not_sent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stream = FakeStream()
+    use_dialogue_fakes(monkeypatch, FakeTts(), ScriptedDecider(ROADS_IN_W04))
+    monkeypatch.setattr(app_module, "stt_stream_factory", lambda settings: stream)
+
+    def late_event_on_hang_up(sent: list) -> bool:
+        if {"type": "call_ended", "reason": "ticket"} in sent:
+            stream._events.put_nowait(SttEvent(type="transcript", text="ಹಲೋ"))
+        return False  # never leaves: the server hangs up
+
+    browser = ScriptedBrowser([bytes(1024)], leave_when=late_event_on_hang_up)
+    asyncio.run(app_module.call(browser))  # ScriptedBrowser raises on a send after close
+
     assert browser.sent[-1] == {"type": "call_ended", "reason": "ticket"}
     assert browser.closed_with == 1000
 

@@ -102,10 +102,17 @@ class ScriptedBrowser:
         return {"type": "websocket.disconnect", "code": self.closed_with or 1001}
 
     async def send_json(self, data: dict) -> None:
+        self._check_open()
         self.sent.append(data)
 
     async def send_bytes(self, data: bytes) -> None:
+        self._check_open()
         self.sent.append(data)
+
+    def _check_open(self) -> None:
+        # As Starlette does: sending on a socket the server has closed is an error.
+        if self.closed_with is not None:
+            raise RuntimeError("Cannot send once the socket is closed")
 
     async def close(self, code: int = 1000) -> None:
         self.closed_with = code
