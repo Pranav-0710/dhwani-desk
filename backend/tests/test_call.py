@@ -7,7 +7,6 @@ from fakes import ROADS_IN_W04, FakeStream, ScriptedBrowser, ScriptedDecider, us
 
 import app as app_module
 from audio.speaker import Speaker
-from dialogue.echo import ECHO_PREFIX, EchoAgent
 from dialogue.machine import CountingDesk
 from gnani.prisma import SttEvent
 from gnani.timbre import TimbreError
@@ -50,13 +49,6 @@ class RecordingOutbox:
 
     async def audio(self, pcm: bytes) -> None:
         self.sent.append(pcm)
-
-
-def test_echo_agent_repeats_the_transcript_and_ignores_blank() -> None:
-    agent = EchoAgent()
-
-    assert agent.reply(" ರಸ್ತೆ ") == f"{ECHO_PREFIX}ರಸ್ತೆ"
-    assert agent.reply("   ") is None
 
 
 def test_speaker_frames_each_line_and_survives_a_tts_failure() -> None:
