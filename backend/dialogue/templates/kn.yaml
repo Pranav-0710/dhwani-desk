@@ -1,0 +1,63 @@
+# Everything the agent says, in Kannada. The dialogue state machine picks a line by key;
+# placeholders in {braces} are filled in at call time. Lines without placeholders are fixed,
+# so their audio is synthesised once and reused (see audio/tts_cache.py).
+#
+# Write for the ear: short sentences, numbers as digits (Timbre reads them), no Latin letters.
+
+lines:
+  # Hello, welcome to the Nagara Seva helpline. Please tell us your complaint.
+  greeting: "ನಮಸ್ಕಾರ, ನಗರ ಸೇವಾ ಸಹಾಯವಾಣಿಗೆ ಸ್ವಾಗತ. ನಿಮ್ಮ ದೂರು ಏನು ಅಂತ ಹೇಳಿ."
+
+  # Sorry, I didn't quite understand the problem. Could you describe it in a little more detail?
+  ask_problem: "ಕ್ಷಮಿಸಿ, ಸಮಸ್ಯೆ ಸರಿಯಾಗಿ ಅರ್ಥ ಆಗಲಿಲ್ಲ. ಏನು ಸಮಸ್ಯೆ ಅಂತ ಸ್ವಲ್ಪ ವಿವರವಾಗಿ ಹೇಳ್ತೀರಾ?"
+
+  # Which ward or area is this problem in? Please also tell a nearby landmark.
+  ask_location: "ಈ ಸಮಸ್ಯೆ ಯಾವ ವಾರ್ಡ್ ಅಥವಾ ಏರಿಯಾದಲ್ಲಿ ಇದೆ? ಹತ್ತಿರದ ಗುರುತು ಕೂಡ ಹೇಳಿ."
+
+  # Thank you. Could you tell me which ward that is?
+  ask_ward: "ಧನ್ಯವಾದ. ಅದು ಯಾವ ವಾರ್ಡ್ ಅಂತ ಹೇಳ್ತೀರಾ?"
+
+  # Sorry for the trouble.
+  apology: "ತೊಂದರೆಗೆ ಕ್ಷಮಿಸಿ."
+
+  # I have marked this as a problem you reported before; we will give it priority.
+  repeat_noted: "ಇದು ಮೊದಲೇ ದೂರು ಕೊಟ್ಟ ಸಮಸ್ಯೆ ಅಂತ ಗುರುತು ಮಾಡಿದ್ದೇನೆ, ಇದಕ್ಕೆ ಆದ್ಯತೆ ಕೊಡ್ತೀವಿ."
+
+  # Okay, your {department} complaint in {ward} ward is registered. Your ticket number is {ticket}.
+  read_back_ward: "ಸರಿ, {ward} ವಾರ್ಡ್‌ನ ನಿಮ್ಮ {department} ದೂರು ದಾಖಲಾಗಿದೆ. ನಿಮ್ಮ ಟಿಕೆಟ್ ಸಂಖ್ಯೆ {ticket}."
+
+  # Okay, your {department} complaint is registered. Your ticket number is {ticket}.
+  read_back: "ಸರಿ, ನಿಮ್ಮ {department} ದೂರು ದಾಖಲಾಗಿದೆ. ನಿಮ್ಮ ಟಿಕೆಟ್ ಸಂಖ್ಯೆ {ticket}."
+
+  # Our team will look into it. Thank you for calling.
+  closing: "ನಮ್ಮ ತಂಡ ಇದನ್ನು ನೋಡಿಕೊಳ್ಳುತ್ತದೆ. ಕರೆ ಮಾಡಿದ್ದಕ್ಕೆ ಧನ್ಯವಾದ."
+
+  # This is dangerous, please stay away from that spot. I am connecting you to an officer now.
+  safety: "ಇದು ಅಪಾಯಕಾರಿ, ದಯವಿಟ್ಟು ಆ ಜಾಗದಿಂದ ದೂರ ಇರಿ. ನಿಮ್ಮನ್ನು ಈಗಲೇ ಅಧಿಕಾರಿಗೆ ಸಂಪರ್ಕಿಸುತ್ತಿದ್ದೇನೆ."
+
+  # This is dangerous. If anyone is hurt or in danger, call one one two (112) right now.
+  # I am connecting you to an officer. (A risk the corporation cannot handle: chest pain, a fight.)
+  safety_redirect: "ಇದು ಅಪಾಯಕಾರಿ. ಯಾರಿಗಾದರೂ ಗಾಯ ಆಗಿದ್ದರೆ ಅಥವಾ ಜೀವಕ್ಕೆ ಅಪಾಯ ಇದ್ದರೆ ಈಗಲೇ ಒಂದು ಒಂದು ಎರಡು ಸಂಖ್ಯೆಗೆ ಕರೆ ಮಾಡಿ. ನಿಮ್ಮನ್ನು ಅಧಿಕಾರಿಗೆ ಸಂಪರ್ಕಿಸುತ್ತಿದ್ದೇನೆ."
+
+  # Certainly. I am connecting you to an officer, please stay on the line.
+  handoff_human: "ಖಂಡಿತ. ನಿಮ್ಮನ್ನು ಅಧಿಕಾರಿಗೆ ಸಂಪರ್ಕಿಸುತ್ತಿದ್ದೇನೆ, ದಯವಿಟ್ಟು ಲೈನ್‌ನಲ್ಲಿ ಇರಿ."
+
+  # I understand your difficulty. I am connecting you to an officer, please stay on the line.
+  handoff_calm: "ನಿಮ್ಮ ತೊಂದರೆ ಅರ್ಥ ಆಗುತ್ತೆ. ನಿಮ್ಮನ್ನು ಅಧಿಕಾರಿಗೆ ಸಂಪರ್ಕಿಸುತ್ತಿದ್ದೇನೆ, ದಯವಿಟ್ಟು ಲೈನ್‌ನಲ್ಲಿ ಇರಿ."
+
+  # Sorry, I could not register your complaint properly. I am connecting you to an officer.
+  handoff_unclear: "ಕ್ಷಮಿಸಿ, ನಿಮ್ಮ ದೂರನ್ನು ಸರಿಯಾಗಿ ದಾಖಲಿಸಲು ಆಗಲಿಲ್ಲ. ನಿಮ್ಮನ್ನು ಅಧಿಕಾರಿಗೆ ಸಂಪರ್ಕಿಸುತ್ತಿದ್ದೇನೆ."
+
+  # Sorry, this is not a city corporation matter. For police, ambulance or fire emergencies,
+  # call one one two (112). Thank you for calling.
+  redirect: "ಕ್ಷಮಿಸಿ, ಇದು ನಗರಸಭೆಯ ವಿಷಯ ಅಲ್ಲ. ಪೊಲೀಸ್, ಆಂಬುಲೆನ್ಸ್ ಅಥವಾ ಅಗ್ನಿಶಾಮಕ ತುರ್ತಿಗೆ ಒಂದು ಒಂದು ಎರಡು ಸಂಖ್ಯೆಗೆ ಕರೆ ಮಾಡಿ. ಕರೆ ಮಾಡಿದ್ದಕ್ಕೆ ಧನ್ಯವಾದ."
+
+# How each department is named inside a read-back line ("your ___ complaint").
+departments:
+  water: "ಕುಡಿಯುವ ನೀರಿನ"  # drinking water
+  sewage-drainage: "ಒಳಚರಂಡಿ"  # drainage
+  solid-waste: "ಕಸ ವಿಲೇವಾರಿ"  # garbage disposal
+  roads: "ರಸ್ತೆ"  # road
+  streetlights: "ಬೀದಿ ದೀಪದ"  # streetlight
+  stray-animals: "ಬೀದಿ ಪ್ರಾಣಿಗಳ"  # stray animal
+  other: "ನಾಗರಿಕ"  # civic

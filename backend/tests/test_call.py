@@ -1,12 +1,14 @@
 import asyncio
+import threading
 from collections.abc import AsyncIterator
 
 import pytest
-from fakes import FakeStream, ScriptedBrowser, use_fakes
+from fakes import ROADS_IN_W04, FakeStream, ScriptedBrowser, ScriptedDecider, use_fakes
 
 import app as app_module
 from audio.speaker import Speaker
-from dialogue.echo import ECHO_PREFIX, EchoAgent
+from dialogue.machine import CountingDesk
+from gnani.prisma import SttEvent
 from gnani.timbre import TimbreError
 
 
@@ -47,13 +49,6 @@ class RecordingOutbox:
 
     async def audio(self, pcm: bytes) -> None:
         self.sent.append(pcm)
-
-
-def test_echo_agent_repeats_the_transcript_and_ignores_blank() -> None:
-    agent = EchoAgent()
-
-    assert agent.reply(" ರಸ್ತೆ ") == f"{ECHO_PREFIX}ರಸ್ತೆ"
-    assert agent.reply("   ") is None
 
 
 def test_speaker_frames_each_line_and_survives_a_tts_failure() -> None:
@@ -102,30 +97,131 @@ def test_speaker_close_stops_mid_line_without_sending_more() -> None:
     assert {"type": "agent_audio_end"} not in outbox.sent
 
 
-def test_call_echoes_each_transcript_as_speech(monkeypatch: pytest.MonkeyPatch) -> None:
-    tts = FakeTts()
+def lines_of(sent: list[dict | bytes], kind: str, field: str) -> list:
+    return [m[field] for m in sent if isinstance(m, dict) and m["type"] == kind]
+
+
+def use_dialogue_fakes(monkeypatch: pytest.MonkeyPatch, tts: FakeTts, decider=None) -> None:
     use_fakes(monkeypatch, FakeStream(), tts)
-    browser = ScriptedBrowser(
-        [bytes(1024)], leave_when=lambda sent: {"type": "agent_audio_end"} in sent
-    )
+    monkeypatch.setattr(app_module, "turn_pause_s", 0.02)
+    monkeypatch.setattr(app_module, "TTS_CACHE", {})
+    monkeypatch.setattr(app_module, "HANG_UP_GRACE_S", 0.01)
+    if decider is not None:
+        monkeypatch.setattr(app_module, "decider", decider)
+
+
+def ended_lines(count: int):
+    return lambda sent: sent.count({"type": "agent_audio_end"}) >= count
+
+
+def test_call_greets_on_connect_then_answers_the_callers_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tts = FakeTts()
+    use_dialogue_fakes(monkeypatch, tts)
+    browser = ScriptedBrowser([bytes(1024)], leave_when=ended_lines(2))
 
     asyncio.run(app_module.call(browser))
 
-    reply = f"{ECHO_PREFIX}ರಸ್ತೆ"
+    greeting, ask_problem = (app_module.TEMPLATES.lines[k] for k in ("greeting", "ask_problem"))
     assert browser.sent[:2] == [
         {"type": "config", "sample_rate": 8000, "tts_sample_rate": 16000},
         {"type": "connected"},
     ]
-    assert browser.sent[2]["text"] == "ರಸ್ತೆ"
-    assert browser.sent[3:] == [
-        {"type": "agent_text", "text": reply},
-        {"type": "agent_audio_start", "sample_rate": 16000},
-        bytes([1, 0]) * 4,
-        bytes([2, 0]) * 4,
-        {"type": "agent_audio_end"},
-    ]
-    assert tts.spoken == [reply]
+    # "ರಸ್ತೆ" alone names no problem the keyword stand-in knows, so the agent asks again.
+    assert lines_of(browser.sent, "dialogue", "keys") == [["greeting"], ["ask_problem"]]
+    assert lines_of(browser.sent, "transcript", "text") == ["ರಸ್ತೆ"]
+    assert lines_of(browser.sent, "agent_text", "text") == [greeting, ask_problem]
+    assert tts.spoken == [greeting, ask_problem]
     assert tts.closed
+
+
+def test_a_whole_call_ends_with_a_ticket(monkeypatch: pytest.MonkeyPatch) -> None:
+    use_dialogue_fakes(monkeypatch, FakeTts(), ScriptedDecider(ROADS_IN_W04))
+    browser = ScriptedBrowser([bytes(1024)], leave_when=ended_lines(3))
+
+    asyncio.run(app_module.call(browser))
+
+    closing = [m for m in browser.sent if isinstance(m, dict) and m["type"] == "dialogue"][-1]
+    assert closing["keys"] == ["read_back_ward", "closing"]
+    assert (closing["state"], closing["ticket"]["ward"]) == ("closed", "w04")
+    # The agent hangs up once its last line has been heard.
+    assert browser.sent[-1] == {"type": "call_ended", "reason": "ticket"}
+    assert browser.closed_with == 1000
+
+
+def test_a_late_prisma_event_during_the_hang_up_is_not_sent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stream = FakeStream()
+    use_dialogue_fakes(monkeypatch, FakeTts(), ScriptedDecider(ROADS_IN_W04))
+    monkeypatch.setattr(app_module, "stt_stream_factory", lambda settings: stream)
+
+    def late_event_on_hang_up(sent: list) -> bool:
+        if {"type": "call_ended", "reason": "ticket"} in sent:
+            stream._events.put_nowait(SttEvent(type="transcript", text="ಹಲೋ"))
+        return False  # never leaves: the server hangs up
+
+    browser = ScriptedBrowser([bytes(1024)], leave_when=late_event_on_hang_up)
+    asyncio.run(app_module.call(browser))  # ScriptedBrowser raises on a send after close
+
+    assert browser.sent[-1] == {"type": "call_ended", "reason": "ticket"}
+    assert browser.closed_with == 1000
+
+
+def test_a_failing_decider_hands_the_call_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    use_dialogue_fakes(monkeypatch, FakeTts(), ScriptedDecider(RuntimeError("model crashed")))
+    browser = ScriptedBrowser([bytes(1024)], leave_when=ended_lines(2))
+
+    asyncio.run(app_module.call(browser))
+
+    assert lines_of(browser.sent, "dialogue", "keys") == [["greeting"], ["handoff_unclear"]]
+    assert lines_of(browser.sent, "dialogue", "reason")[-1] == "decider_error"
+
+
+def test_a_decision_still_running_when_the_call_ends_files_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started, release = threading.Event(), threading.Event()
+
+    class SlowDecider:
+        def decide(self, transcript: str):
+            started.set()
+            release.wait(5)
+            return ROADS_IN_W04
+
+    desk = CountingDesk(start=1)
+    use_dialogue_fakes(monkeypatch, FakeTts(), SlowDecider())
+    monkeypatch.setattr(app_module, "TICKETS", desk)
+    browser = ScriptedBrowser(
+        [bytes(1024)],
+        leave_when=lambda sent: started.is_set(),  # leave mid-decision
+    )
+
+    async def scenario() -> None:
+        await app_module.call(browser)  # the browser leaves while the decision is running
+        release.set()
+        await asyncio.sleep(0.1)  # let the decision thread finish
+
+    asyncio.run(scenario())
+
+    assert lines_of(browser.sent, "dialogue", "keys") == [["greeting"]]
+    assert desk.next_number() == "1"  # no ticket number was used up
+
+
+def test_fixed_lines_are_synthesised_once_across_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    tts = FakeTts()
+    use_dialogue_fakes(monkeypatch, tts)
+    monkeypatch.setattr(app_module, "stt_stream_factory", lambda settings: FakeStream())
+
+    async def two_calls() -> None:
+        for _ in range(2):
+            await app_module.call(ScriptedBrowser([bytes(1024)], leave_when=ended_lines(2)))
+
+    asyncio.run(two_calls())
+
+    greeting = app_module.TEMPLATES.lines["greeting"]
+    assert tts.spoken.count(greeting) == 1
 
 
 def test_unexpected_tts_failure_still_ends_the_line_and_keeps_going() -> None:
@@ -157,17 +253,40 @@ def test_unexpected_tts_failure_still_ends_the_line_and_keeps_going() -> None:
 
 
 def test_call_reports_tts_error_and_keeps_the_call_open(monkeypatch: pytest.MonkeyPatch) -> None:
-    reply = f"{ECHO_PREFIX}ರಸ್ತೆ"
-    use_fakes(monkeypatch, FakeStream(), FakeTts(fail_on=reply))
-    browser = ScriptedBrowser(
-        [bytes(1024)], leave_when=lambda sent: {"type": "agent_audio_end"} in sent
-    )
+    greeting = app_module.TEMPLATES.lines["greeting"]
+    tts = FakeTts(fail_on=greeting)
+    use_dialogue_fakes(monkeypatch, tts)
+    browser = ScriptedBrowser([bytes(1024)], leave_when=ended_lines(2))
 
     asyncio.run(app_module.call(browser))
 
-    assert browser.sent[-3:] == [
-        {"type": "agent_audio_start", "sample_rate": 16000},
-        {"type": "tts_error", "message": "Timbre SERVICE_UNAVAILABLE: busy (HTTP 503)"},
-        {"type": "agent_audio_end"},
-    ]
+    assert {
+        "type": "tts_error",
+        "message": "Timbre SERVICE_UNAVAILABLE: busy (HTTP 503)",
+    } in browser.sent
+    # The failed greeting is not cached, and the call still answers the caller's turn.
+    assert tts.spoken == [app_module.TEMPLATES.lines["ask_problem"]]
     assert browser.closed_with is None  # the browser left; the server never closed the call
+
+
+def test_speaker_waits_until_the_browser_has_played_the_audio() -> None:
+    outbox = RecordingOutbox()
+
+    class LongTts(FakeTts):
+        async def stream(self, text: str, voice: str | None = None) -> AsyncIterator[bytes]:
+            yield bytes(9600)  # 0.3 s of 16-bit mono at 16 kHz, sent at once
+            yield bytes(9600)
+
+    async def scenario() -> float:
+        speaker = Speaker(LongTts(), outbox, sample_rate=16000)
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        speaker.say("ಸರಿ")
+        await speaker.wait_until_heard()
+        waited = loop.time() - started
+        await speaker.aclose()
+        return waited
+
+    waited = asyncio.run(scenario())
+    # Sent in an instant, but the browser needs 0.6 s to play it.
+    assert 0.55 <= waited < 1.0
