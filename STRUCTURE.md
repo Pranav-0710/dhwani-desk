@@ -58,7 +58,7 @@ While working:
 Finishing:
 9.  Open a PR — fill in the template; title in `type: description` form
 10. Link the issue with "Closes #[number]"
-11. Request the other person as reviewer
+11. The other person is requested as reviewer automatically (`.github/CODEOWNERS`)
 12. Wait for CI to pass
 13. Get approval → Squash and merge → Delete branch
 
@@ -112,6 +112,7 @@ Every version used for training or serving gets a tag (for example `data-v1`, `l
 - Never commit a token, print it, or paste it into chat, issues or PRs.
 
 **Access**
-- Members of the Dhwanidesk organization see the private repos. Jey Pranav is admin. Invite Lakshmi Narasimman (role: write) when they rejoin: organization page → Settings → Members.
+- Members of the Dhwanidesk organization see the private repos: Jey Pranav (admin) and Lakshmi Narasimman (write). Members are managed on the organization page → Settings → Members.
+- Each member uses their own tokens: a read token in their own `.env`, and a write token in their own Kaggle / Colab secrets.
 - The repos stay private. The upload code refuses to push to a repo that is public.
 
