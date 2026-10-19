@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from dialogue.decision import Decision
-from tickets.masking import mask_personal_ids
+from tickets.masking import mask_personal_ids, mask_turns
 
 # Ticket numbers start here, so every number the agent reads back has four digits.
 FIRST_NUMBER = 1001
@@ -39,7 +39,9 @@ CREATE TABLE IF NOT EXISTS transcripts (
     created_at TEXT NOT NULL,
     call_id TEXT NOT NULL,
     turn INTEGER NOT NULL,
-    text TEXT NOT NULL
+    text TEXT NOT NULL,
+    -- the highest probability, so far in the call, that the caller said a personal number
+    personal_id REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS transcripts_by_age ON transcripts (created_at);
 CREATE INDEX IF NOT EXISTS transcripts_by_call ON transcripts (call_id, turn);
@@ -72,6 +74,9 @@ class TicketStore:
         self._db.row_factory = sqlite3.Row
         self._lock = threading.Lock()
         with self._lock, self._db:
+            # Fewer disk syncs per write: a crash may lose the last write, never corrupt.
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute("PRAGMA synchronous=NORMAL")
             self._db.executescript(SCHEMA)
 
     def close(self) -> None:
@@ -101,17 +106,30 @@ class TicketStore:
         return str(cursor.lastrowid + FIRST_NUMBER - 1)
 
     def record_turn(self, call_id: str, turn: int, text: str, personal_id: float) -> None:
-        """Store one caller turn, masked. `personal_id` is the decider's probability that
-        the caller said a personal number; pass 1.0 when no decision is available."""
+        """Store one caller turn, masked, and mask the call's earlier turns again.
+
+        `personal_id` is the decider's probability that the caller said a personal number
+        (pass 1.0 when there is no decision). A number can be spread over turns, and the
+        decider may only recognise it as personal on a later one, so every turn of the call
+        is masked together, with the highest probability the call has reached.
+        """
         with self._lock, self._db:
+            earlier = self._db.execute(
+                "SELECT id, text, personal_id FROM transcripts WHERE call_id = ? ORDER BY turn",
+                (call_id,),
+            ).fetchall()
+            highest = max([personal_id, *(row["personal_id"] for row in earlier)])
+            *remasked, latest = mask_turns([*(row["text"] for row in earlier), text], highest)
+            for row, masked in zip(earlier, remasked, strict=True):
+                if masked != row["text"] or highest != row["personal_id"]:
+                    self._db.execute(
+                        "UPDATE transcripts SET text = ?, personal_id = ? WHERE id = ?",
+                        (masked, highest, row["id"]),
+                    )
             self._db.execute(
-                "INSERT INTO transcripts (created_at, call_id, turn, text) VALUES (?, ?, ?, ?)",
-                (
-                    now().isoformat(timespec="seconds"),
-                    call_id,
-                    turn,
-                    mask_personal_ids(text, personal_id),
-                ),
+                "INSERT INTO transcripts (created_at, call_id, turn, text, personal_id)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (now().isoformat(timespec="seconds"), call_id, turn, latest, highest),
             )
 
     def tickets(self, limit: int = 50) -> list[dict[str, Any]]:
@@ -122,12 +140,10 @@ class TicketStore:
             ).fetchall()
         return [_ticket(row) for row in rows]
 
-    def ticket(self, number: str) -> dict[str, Any] | None:
-        if not number.isdigit():
-            return None
+    def ticket(self, number: int) -> dict[str, Any] | None:
         with self._lock:
             row = self._db.execute(
-                "SELECT * FROM tickets WHERE id = ?", (int(number) - FIRST_NUMBER + 1,)
+                "SELECT * FROM tickets WHERE id = ?", (number - FIRST_NUMBER + 1,)
             ).fetchone()
         return _ticket(row) if row else None
 

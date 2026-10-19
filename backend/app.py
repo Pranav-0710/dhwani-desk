@@ -5,7 +5,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Path, Query, WebSocket, WebSocketDisconnect
 
 from audio.outbox import Outbox
 from audio.speaker import Speaker
@@ -18,7 +18,7 @@ from dialogue.templates import load_templates
 from dialogue.turns import TURN_PAUSE_S, TurnCollector
 from gnani.prisma import PrismaConfig, PrismaError, PrismaStream, SttEvent, load_bias_words
 from gnani.timbre import TimbreClient, TimbreConfig
-from tickets.store import TicketStore
+from tickets.store import FIRST_NUMBER, TicketStore
 
 logger = logging.getLogger("dhwani.stt")
 
@@ -34,8 +34,14 @@ def get_ticket_store() -> TicketStore:
 async def _sweep_transcripts() -> None:
     while True:
         days = get_settings().transcript_retention_days
-        if purged := get_ticket_store().purge_transcripts(days):
-            logger.info("Deleted %d caller turns older than %d days", purged, days)
+        try:
+            purged = await asyncio.to_thread(get_ticket_store().purge_transcripts, days)
+        except Exception:
+            # One failed pass (a locked database) must not end retention for good.
+            logger.exception("Deleting old caller turns failed; trying again later")
+        else:
+            if purged:
+                logger.info("Deleted %d caller turns older than %d days", purged, days)
         await asyncio.sleep(RETENTION_SWEEP_S)
 
 
@@ -107,7 +113,7 @@ def list_tickets(limit: int = Query(50, ge=1, le=500)) -> list[dict[str, Any]]:
 
 
 @app.get("/api/tickets/{number}")
-def get_ticket(number: str) -> dict[str, Any]:
+def get_ticket(number: int = Path(ge=FIRST_NUMBER, le=2**31)) -> dict[str, Any]:
     if (ticket := get_ticket_store().ticket(number)) is None:
         raise HTTPException(status_code=404, detail="No such ticket")
     return ticket
@@ -204,19 +210,20 @@ async def call(websocket: WebSocket) -> None:
                     decision = await asyncio.to_thread(dialogue.decider.decide, transcript)
                 except Exception:
                     logger.exception("Deciding a caller turn failed; handing off")
-                    # No decision to say whether it holds a personal number: mask as if it did.
-                    store.record_turn(
-                        dialogue.call_id, len(dialogue.turns), dialogue.turns[-1], 1.0
-                    )
                     reply = dialogue.decider_failed()
+                    # No decision to say whether it holds a personal number: mask as if it did.
+                    personal_id = 1.0
                 else:
-                    store.record_turn(
-                        dialogue.call_id,
-                        len(dialogue.turns),
-                        dialogue.turns[-1],
-                        decision.contains_personal_id,
-                    )
                     reply = dialogue.respond(decision)
+                    personal_id = decision.contains_personal_id
+                # Off the event loop: a disk write must not stall the audio of other calls.
+                await asyncio.to_thread(
+                    store.record_turn,
+                    dialogue.call_id,
+                    len(dialogue.turns),
+                    dialogue.turns[-1],
+                    personal_id,
+                )
                 await answer(reply)
 
         async def converse(event: SttEvent) -> None:
