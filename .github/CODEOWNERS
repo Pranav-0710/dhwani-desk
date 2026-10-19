@@ -1,0 +1,4 @@
+# Every PR asks the other person to review. GitHub never requests a PR's own author, so
+# listing both members on every path requests exactly one reviewer: the other one. main needs
+# that approval to merge (STRUCTURE.md, "Review"). Who owns which directory is in AGENTS.md.
+* @Pranav-0710 @lakshmi-narasimma
