@@ -17,6 +17,7 @@ from Kaggle / Colab secrets.
 """
 
 import argparse
+import functools
 import json
 import os
 import random
@@ -696,14 +697,30 @@ def write_output(
     (out / "README.md").write_text(dataset_card(model_name, summary), "utf-8")
 
 
+TOKEN_HELP = (
+    "HF_TOKEN needs write access to {repo}: on huggingface.co, Settings → Access Tokens, "
+    "use a Write token, or a fine-grained token with write access to the repos of the "
+    "{namespace} organization."
+)
+
+
+@functools.cache
 def hub(repo: str) -> Any:
-    """A Hub client for `repo`, which is created private if missing and refused if public."""
+    """A Hub client for `repo`, which is refused if public and created private if missing.
+
+    The repo is only created when it does not exist: creating needs the right to make repos
+    in the organization, which a token that can write to this one repo may not have.
+    """
     from huggingface_hub import HfApi
+    from huggingface_hub.errors import RepositoryNotFoundError
 
     api = HfApi(token=os.environ["HF_TOKEN"])
-    api.create_repo(repo, repo_type="dataset", private=True, exist_ok=True)
-    # create_repo leaves an existing repo as it is, so a public one would stay public.
-    if not api.repo_info(repo, repo_type="dataset").private:
+    try:
+        info = api.repo_info(repo, repo_type="dataset")
+    except RepositoryNotFoundError:
+        api.create_repo(repo, repo_type="dataset", private=True)
+        info = api.repo_info(repo, repo_type="dataset")
+    if not info.private:
         raise SystemExit(f"{repo} is public; make it private before uploading")
     return api
 
@@ -714,22 +731,41 @@ CHECKPOINT = "checkpoint"
 
 
 def save_checkpoint(
-    out: Path, run: dict[str, Any], accepted: Rows, rejected: Rows, repo: str | None
+    out: Path,
+    run: dict[str, Any],
+    accepted: Rows,
+    rejected: Rows,
+    repo: str | None,
+    strict: bool = False,
 ) -> None:
+    """Write the rows so far under out/ and, with `repo`, upload them.
+
+    The local copy always lands first. A failed upload stops the run only when `strict`
+    (the check before generation starts); mid-run it is reported and the run goes on, and
+    the next checkpoint tries again.
+    """
     folder = out / CHECKPOINT
     folder.mkdir(parents=True, exist_ok=True)
     write_jsonl(folder / "train.jsonl", accepted)
     write_jsonl(folder / "rejected.jsonl", rejected)
     (folder / "run.json").write_text(json.dumps(run), "utf-8")
+    where = str(folder)
     if repo:
-        hub(repo).upload_folder(
-            folder_path=folder,
-            path_in_repo=CHECKPOINT,
-            repo_id=repo,
-            repo_type="dataset",
-            commit_message=f"checkpoint: {len(accepted)} rows kept",
-        )
-    print(f"checkpoint saved: {len(accepted)} kept", flush=True)
+        try:
+            hub(repo).upload_folder(
+                folder_path=folder,
+                path_in_repo=CHECKPOINT,
+                repo_id=repo,
+                repo_type="dataset",
+                commit_message=f"checkpoint: {len(accepted)} rows kept",
+            )
+            where = f"{folder} and {repo}"
+        except Exception as exc:
+            help_text = TOKEN_HELP.format(repo=repo, namespace=repo.split("/")[0])
+            if strict:
+                raise SystemExit(f"Cannot upload to {repo}: {exc}\n{help_text}") from exc
+            print(f"WARNING: checkpoint upload failed ({exc}); kept in {folder}", flush=True)
+    print(f"checkpoint saved: {len(accepted)} kept ({where})", flush=True)
 
 
 def load_checkpoint(out: Path, run: dict[str, Any], repo: str | None) -> tuple[Rows, Rows]:
@@ -761,13 +797,20 @@ def load_checkpoint(out: Path, run: dict[str, Any], repo: str | None) -> tuple[R
 
 def push(out: Path, repo: str, message: str) -> None:
     api = hub(repo)
-    api.upload_folder(
-        folder_path=out,
-        repo_id=repo,
-        repo_type="dataset",
-        commit_message=message,
-        ignore_patterns=[f"{CHECKPOINT}/*"],
-    )
+    try:
+        api.upload_folder(
+            folder_path=out,
+            repo_id=repo,
+            repo_type="dataset",
+            commit_message=message,
+            ignore_patterns=[f"{CHECKPOINT}/*"],
+        )
+    except Exception as exc:
+        raise SystemExit(
+            f"The run finished but the upload to {repo} failed: {exc}\n"
+            f"Every file is in {out}; download them before the session ends, or fix the "
+            "token and run again with --resume to upload."
+        ) from exc
     if api.file_exists(repo, f"{CHECKPOINT}/run.json", repo_type="dataset"):
         api.delete_folder(
             CHECKPOINT, repo_id=repo, repo_type="dataset", commit_message="run finished"
@@ -825,6 +868,10 @@ def main() -> None:
 
     def checkpoint(accepted: Rows, rejected: Rows) -> None:
         save_checkpoint(args.out, run, accepted, rejected, args.push_repo)
+
+    if args.push_repo:
+        # Prove the token can write before hours of generation depend on it.
+        save_checkpoint(args.out, run, *previous, args.push_repo, strict=True)
 
     accepted, rejected, finished = generate(
         specs,

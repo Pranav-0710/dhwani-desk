@@ -374,3 +374,84 @@ def test_a_checkpoint_round_trips_and_refuses_a_different_run(tmp_path) -> None:
     assert gd.load_checkpoint(tmp_path, run, None) == (kept, failed)
     with pytest.raises(SystemExit):
         gd.load_checkpoint(tmp_path, run | {"n": 3000}, None)
+
+
+class FakeHub:
+    """Stands in for huggingface_hub.HfApi. A token like the Kaggle one that failed: it can
+    write to an existing repo but may not create repos in the organization."""
+
+    instances: list["FakeHub"] = []
+
+    def __init__(self, token: str | None = None, *, exists: bool = True, upload_error=None):
+        self.exists, self.upload_error = exists, upload_error
+        self.created, self.uploads = False, []
+        FakeHub.instances.append(self)
+
+    def repo_info(self, repo, repo_type):
+        from huggingface_hub.errors import RepositoryNotFoundError
+
+        if not self.exists:
+            # The real error wants an HTTP response to build; the type is what matters here.
+            error = RepositoryNotFoundError.__new__(RepositoryNotFoundError)
+            Exception.__init__(error, "missing")
+            raise error
+        return type("Info", (), {"private": True})()
+
+    def create_repo(self, repo, repo_type, private):
+        if self.exists:
+            raise PermissionError("403: no rights to create under the namespace")
+        self.created, self.exists = True, True
+
+    def upload_folder(self, **kwargs):
+        if self.upload_error:
+            raise self.upload_error
+        self.uploads.append(kwargs)
+
+
+def use_fake_hub(monkeypatch, **behaviour) -> None:
+    import huggingface_hub
+
+    gd.hub.cache_clear()
+    FakeHub.instances.clear()
+    monkeypatch.setenv("HF_TOKEN", "test")
+    monkeypatch.setattr(huggingface_hub, "HfApi", lambda token=None: FakeHub(token, **behaviour))
+
+
+RUN = {"n": 6, "seed": 0, "model": "fake", "attempts": 3, "meaning_check": True}
+
+
+def test_an_existing_repo_is_never_created(monkeypatch, tmp_path) -> None:
+    use_fake_hub(monkeypatch)
+    gd.save_checkpoint(tmp_path, RUN, [], [], "Org/data", strict=True)
+    hub = FakeHub.instances[0]
+    assert not hub.created and hub.uploads[0]["path_in_repo"] == gd.CHECKPOINT
+
+
+def test_a_missing_repo_is_created_private(monkeypatch, tmp_path) -> None:
+    use_fake_hub(monkeypatch, exists=False)
+    gd.save_checkpoint(tmp_path, RUN, [], [], "Org/data", strict=True)
+    assert FakeHub.instances[0].created
+
+
+def test_a_token_that_cannot_write_stops_the_run_before_it_starts(monkeypatch, tmp_path) -> None:
+    use_fake_hub(monkeypatch, upload_error=PermissionError("403 Forbidden"))
+    with pytest.raises(SystemExit) as stopped:
+        gd.save_checkpoint(tmp_path, RUN, [], [], "Org/data", strict=True)
+    assert "write access to Org/data" in str(stopped.value)
+
+
+def test_a_failed_upload_mid_run_keeps_the_local_checkpoint_and_goes_on(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    use_fake_hub(monkeypatch, upload_error=ConnectionError("network down"))
+    kept = [{"id": "gen-00002", "text": "ನೀರು", "labels": {}, "meta": {}}]
+    gd.save_checkpoint(tmp_path, RUN, kept, [], "Org/data")
+    assert "WARNING: checkpoint upload failed" in capsys.readouterr().out
+    assert gd.load_checkpoint(tmp_path, RUN, None) == (kept, [])
+
+
+def test_a_failed_final_upload_says_where_the_files_are(monkeypatch, tmp_path) -> None:
+    use_fake_hub(monkeypatch, upload_error=PermissionError("403 Forbidden"))
+    with pytest.raises(SystemExit) as stopped:
+        gd.push(tmp_path, "Org/data", "rows")
+    assert str(tmp_path) in str(stopped.value)
