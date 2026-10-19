@@ -148,6 +148,8 @@ class ScriptedDecider:
     """Returns the queued decisions in order (raising any queued exception) and records what
     it was asked about."""
 
+    revision = "scripted"
+
     def __init__(self, *decisions: Decision | Exception) -> None:
         self.decisions = list(decisions)
         self.transcripts: list[str] = []

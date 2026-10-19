@@ -1,26 +1,55 @@
 import asyncio
 import contextlib
+import functools
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 
 from audio.outbox import Outbox
 from audio.speaker import Speaker
 from audio.tts_cache import AudioCache, CachedSpeech
 from config import Settings, get_settings
 from dialogue.decision import Decider
-from dialogue.machine import CountingDesk, Dialogue, Reply, State
+from dialogue.machine import Dialogue, Reply, State
 from dialogue.standin import KeywordDecider
 from dialogue.templates import load_templates
 from dialogue.turns import TURN_PAUSE_S, TurnCollector
 from gnani.prisma import PrismaConfig, PrismaError, PrismaStream, SttEvent, load_bias_words
 from gnani.timbre import TimbreClient, TimbreConfig
+from tickets.store import TicketStore
 
 logger = logging.getLogger("dhwani.stt")
 
-app = FastAPI(title="Dhwani Desk", version="0.1.0")
+# How often transcripts past TRANSCRIPT_RETENTION_DAYS are deleted.
+RETENTION_SWEEP_S = 3600.0
+
+
+@functools.cache
+def get_ticket_store() -> TicketStore:
+    return TicketStore(get_settings().database_path)
+
+
+async def _sweep_transcripts() -> None:
+    while True:
+        days = get_settings().transcript_retention_days
+        if purged := get_ticket_store().purge_transcripts(days):
+            logger.info("Deleted %d caller turns older than %d days", purged, days)
+        await asyncio.sleep(RETENTION_SWEEP_S)
+
+
+@contextlib.asynccontextmanager
+async def lifespan(_: FastAPI):
+    sweeper = asyncio.create_task(_sweep_transcripts())
+    try:
+        yield
+    finally:
+        sweeper.cancel()
+        await asyncio.gather(sweeper, return_exceptions=True)
+
+
+app = FastAPI(title="Dhwani Desk", version="0.1.0", lifespan=lifespan)
 
 EventHandler = Callable[[SttEvent], Awaitable[None]]
 FinalMessage = tuple[dict[str, Any], int]
@@ -64,12 +93,24 @@ HANG_UP_GRACE_S = 0.5
 
 TEMPLATES = load_templates()
 TTS_CACHE: AudioCache = {}
-TICKETS = CountingDesk()
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "version": app.version}
+
+
+@app.get("/api/tickets")
+def list_tickets(limit: int = Query(50, ge=1, le=500)) -> list[dict[str, Any]]:
+    """The newest tickets first, for the supervisor console."""
+    return get_ticket_store().tickets(limit)
+
+
+@app.get("/api/tickets/{number}")
+def get_ticket(number: str) -> dict[str, Any]:
+    if (ticket := get_ticket_store().ticket(number)) is None:
+        raise HTTPException(status_code=404, detail="No such ticket")
+    return ticket
 
 
 @app.websocket("/ws/stt")
@@ -112,7 +153,8 @@ async def call(websocket: WebSocket) -> None:
         await _fail(websocket, "GNANI_API_KEY is not set")
         return
     outbox = Outbox(websocket)
-    dialogue = Dialogue(TEMPLATES, decider, TICKETS)
+    store = get_ticket_store()
+    dialogue = Dialogue(TEMPLATES, decider, store)
     turns = TurnCollector(turn_pause_s)
     config = {
         "type": "config",
@@ -162,8 +204,18 @@ async def call(websocket: WebSocket) -> None:
                     decision = await asyncio.to_thread(dialogue.decider.decide, transcript)
                 except Exception:
                     logger.exception("Deciding a caller turn failed; handing off")
+                    # No decision to say whether it holds a personal number: mask as if it did.
+                    store.record_turn(
+                        dialogue.call_id, len(dialogue.turns), dialogue.turns[-1], 1.0
+                    )
                     reply = dialogue.decider_failed()
                 else:
+                    store.record_turn(
+                        dialogue.call_id,
+                        len(dialogue.turns),
+                        dialogue.turns[-1],
+                        decision.contains_personal_id,
+                    )
                     reply = dialogue.respond(decision)
                 await answer(reply)
 
