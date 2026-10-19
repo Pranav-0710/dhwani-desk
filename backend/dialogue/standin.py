@@ -54,6 +54,8 @@ def _has(text: str, words: list[str]) -> bool:
 
 
 class KeywordDecider:
+    revision = "keyword-standin-1"
+
     def __init__(self) -> None:
         wards = json.loads((REPO_ROOT / "data" / "wards.json").read_text("utf-8"))["wards"]
         self._ward_names = {
