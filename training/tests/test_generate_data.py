@@ -455,3 +455,19 @@ def test_a_failed_final_upload_says_where_the_files_are(monkeypatch, tmp_path) -
     with pytest.raises(SystemExit) as stopped:
         gd.push(tmp_path, "Org/data", "rows")
     assert str(tmp_path) in str(stopped.value)
+
+
+def test_a_token_that_cannot_see_the_repo_gets_plain_instructions(monkeypatch, tmp_path) -> None:
+    # A private repo looks "not found" to a token without access, and creating it is refused.
+    use_fake_hub(monkeypatch, exists=False)
+    monkeypatch.setattr(
+        FakeHub,
+        "create_repo",
+        lambda self, *a, **k: (_ for _ in ()).throw(
+            PermissionError("403: no rights to create under the namespace")
+        ),
+    )
+    with pytest.raises(SystemExit) as stopped:
+        gd.load_checkpoint(tmp_path, RUN, "Org/data")
+    assert "cannot see Org/data" in str(stopped.value)
+    assert "write access to the repos of the Org organization" in str(stopped.value)

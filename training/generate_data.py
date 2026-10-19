@@ -718,7 +718,14 @@ def hub(repo: str) -> Any:
     try:
         info = api.repo_info(repo, repo_type="dataset")
     except RepositoryNotFoundError:
-        api.create_repo(repo, repo_type="dataset", private=True)
+        # Also what a private repo looks like to a token without access to it.
+        try:
+            api.create_repo(repo, repo_type="dataset", private=True)
+        except Exception as exc:
+            raise SystemExit(
+                f"HF_TOKEN cannot see {repo} and may not create it ({exc}). "
+                + TOKEN_HELP.format(repo=repo, namespace=repo.split("/")[0])
+            ) from exc
         info = api.repo_info(repo, repo_type="dataset")
     if not info.private:
         raise SystemExit(f"{repo} is public; make it private before uploading")
