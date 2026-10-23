@@ -19,6 +19,7 @@ LINE_KEYS = frozenset(
     {
         "greeting",
         "hold_on",
+        "hand_back",
         "ask_problem",
         "ask_location",
         "ask_ward",

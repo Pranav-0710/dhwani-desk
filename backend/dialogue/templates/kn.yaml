@@ -15,6 +15,10 @@ lines:
   # left in silence.)
   hold_on: "ಸರಿ, ಒಂದು ಕ್ಷಣ."
 
+  # Thank you for waiting. I will carry on with your complaint now. (Said when an officer
+  # hands the call back to the agent.)
+  hand_back: "ಕಾಯ್ದಿದ್ದಕ್ಕೆ ಧನ್ಯವಾದ. ಈಗ ನಿಮ್ಮ ದೂರನ್ನು ನಾನು ಮುಂದುವರಿಸುತ್ತೇನೆ."
+
   # Which ward or area is this problem in? Please also tell a nearby landmark.
   ask_location: "ಈ ಸಮಸ್ಯೆ ಯಾವ ವಾರ್ಡ್ ಅಥವಾ ಏರಿಯಾದಲ್ಲಿ ಇದೆ? ಹತ್ತಿರದ ಗುರುತು ಕೂಡ ಹೇಳಿ."
 

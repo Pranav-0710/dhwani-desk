@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     laya_checkpoint_revision: str = ""
     laya_threads: int = 8
 
+    # Shared secret a supervisor console sends before it may watch or take over calls. Empty
+    # turns /ws/console off: it can speak to callers.
+    console_token: SecretStr = SecretStr("")
+
     @field_validator("gnani_tts_voice", mode="before")
     @classmethod
     def _default_voice_when_blank(cls, value: object) -> object:
