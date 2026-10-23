@@ -121,7 +121,7 @@ Laya answers 10 questions about the conversation so far in one batched call per 
 
 - Questions are written in English; Laya's multilingual checkpoint reads the Kannada state directly. Week 1 tests whether Kannada question text scores better.
 - Every answer is stored with its probability and the model version, so any decision can be audited later.
-- New questions are added only with labelled test data for them; latency budget is ≤ 300 ms p95 for the whole batch on CPU.
+- New questions are added only with labelled test data for them; latency budget on the laptop CPU, for a caller's first turn, is ≤ 0.6 s p95 for the safety questions, asked first, and ≤ 2.5 s p95 for the whole decision, with a cached "one moment" line covering the wait; later turns are slower because Laya rereads the whole call ([measured](decisions/laya-latency.md)).
 
 ## Escalation and safety rules
 
@@ -164,7 +164,7 @@ Pick the best for the build; keep the others as fallbacks. Fine-tuning runs on K
 | --- | --- |
 | `department` macro-F1 after fine-tuning | ≥ 0.80, reported next to the zero-shot baseline |
 | `safety_hazard` and `wants_human` recall | ≥ 0.90 (missing an emergency is worse than a false alarm) |
-| Laya batch latency, all 10 questions, laptop CPU | ≤ 300 ms p95 |
+| Laya latency, laptop CPU, caller's first turn: safety questions / whole decision | ≤ 0.6 s / ≤ 2.5 s p95 |
 | End of caller speech → first agent audio | ≤ 1.5 s |
 | Accuracy drop, 8 kHz + noise vs clean | Reported honestly, whatever it is |
 
@@ -178,7 +178,7 @@ Everything except Gnani's speech APIs is open source and runs on one laptop (Cor
 | --- | --- | --- |
 | Speech-to-text | Gnani Prisma v2.5 realtime (`wss://api.vachana.ai/stt/v3/stream`, `kn-IN`, 8 kHz) | Required; trained on telephony audio |
 | Text-to-speech | Gnani Timbre v2.5 (`kn-IN`), streaming | Required; Indian names and numerals |
-| Decisions | Laya multilingual (`convaiinnovations/laya`), ONNX on CPU | Apache 2.0, ~200 ms CPU, calibrated |
+| Decisions | Laya multilingual (`convaiinnovations/laya`), ONNX on CPU | Apache 2.0, runs on CPU (~0.4 s for the safety questions on the laptop), calibrated |
 | Backend | Python 3.11, FastAPI, WebSockets, asyncio | One process for audio proxy, state machine and Laya |
 | Storage | SQLite (SQLModel) | Zero setup, enough for a demo |
 | Console + phone UI | React + Vite, plain WebSocket | Fast to build, easy to film |

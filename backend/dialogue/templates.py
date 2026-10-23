@@ -13,10 +13,12 @@ TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 WARDS_FILE = REPO_ROOT / "data" / "wards.json"
 SCHEMA_FILE = REPO_ROOT / "data" / "decision_schema.json"
 
-# Every line the state machine can say; loading fails if one is missing.
+# Every line the agent can say (the state machine's, and the call route's `hold_on`); loading
+# fails if one is missing.
 LINE_KEYS = frozenset(
     {
         "greeting",
+        "hold_on",
         "ask_problem",
         "ask_location",
         "ask_ward",
