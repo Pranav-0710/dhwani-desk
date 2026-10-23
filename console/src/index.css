@@ -123,6 +123,50 @@ h1 {
   line-height: 1.5;
 }
 
+.noise {
+  margin: 0;
+  padding: 0;
+  border: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.noise legend {
+  float: left;
+  margin-inline-end: 4px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.noise label {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+/* The radio stays in the page for keyboards and screen readers; the label shows its state. */
+.noise input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.noise label:has(input:checked) {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.noise label:has(input:focus-visible) {
+  outline: 3px solid var(--text);
+  outline-offset: 2px;
+}
+
 button {
   font: inherit;
   font-size: 1.1rem;

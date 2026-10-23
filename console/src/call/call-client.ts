@@ -1,4 +1,5 @@
 import { startMic, type Mic, type StartMic } from '../audio/mic'
+import type { NoiseLevel } from '../audio/noise'
 import { PcmPlayer } from '../audio/player'
 
 /** Keep the mic muted this long after the agent's audio ends, so its tail isn't re-heard. */
@@ -75,6 +76,7 @@ export class CallClient {
   private mutedUntil = 0
   private listeningTimer: ReturnType<typeof setTimeout> | null = null
   private micRate = 8000
+  private noise: NoiseLevel = 'off'
   private ended = false
   private readonly onEvent: (event: CallEvent) => void
   private readonly deps: CallDeps
@@ -105,6 +107,12 @@ export class CallClient {
   async hangUp(): Promise<void> {
     this.socket?.close(1000)
     await this.finish()
+  }
+
+  /** Background line noise on the caller's audio; may change at any point in the call. */
+  setNoise(level: NoiseLevel): void {
+    this.noise = level
+    this.mic?.setNoise(level)
   }
 
   private async handle(message: ServerMessage): Promise<void> {
@@ -171,6 +179,7 @@ export class CallClient {
       await mic.stop()
       return false
     }
+    mic.setNoise(this.noise)
     this.mic = mic
     return true
   }

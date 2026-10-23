@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Mic } from '../audio/mic'
+import type { NoiseLevel } from '../audio/noise'
 import { CallClient, type CallEvent, type CallSocket, type Player } from './call-client'
 
 class FakeSocket implements CallSocket {
@@ -46,7 +47,12 @@ function setup() {
   let clock = 0
   let micResolve: ((mic: Mic) => void) | null = null
   let onPcm: ((pcm: Int16Array<ArrayBuffer>) => void) | null = null
-  const mic = { stopped: false, stop: async () => void (mic.stopped = true) }
+  const mic = {
+    stopped: false,
+    noise: [] as NoiseLevel[],
+    setNoise: (level: NoiseLevel) => void mic.noise.push(level),
+    stop: async () => void (mic.stopped = true),
+  }
 
   const client = new CallClient((event) => events.push(event), {
     openSocket: () => socket,
@@ -155,6 +161,16 @@ describe('CallClient', () => {
     expect(events.some((e) => e.type === 'error' && e.message.includes('NotAllowedError'))).toBe(
       true,
     )
+  })
+
+  it('puts line noise on the mic when it opens and whenever it changes', async () => {
+    const call = setup()
+    call.client.setNoise('heavy') // chosen before the permission prompt is answered
+    call.socket.serverSends({ type: 'connected' })
+    await call.grantMic()
+    call.client.setNoise('off')
+
+    expect(call.mic.noise).toEqual(['heavy', 'off'])
   })
 
   it('does not print empty brackets when Prisma closes without a reason', () => {
