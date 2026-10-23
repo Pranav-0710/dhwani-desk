@@ -58,8 +58,9 @@ function setup() {
     openSocket: () => socket,
     createPlayer: () => player,
     now: () => clock,
-    startMic: (_rate, callback) => {
-      onPcm = callback
+    // Mutes as the real mic does with no line noise: the caller's sound becomes silence.
+    startMic: (_rate, callback, muted) => {
+      onPcm = (pcm) => callback(muted() ? new Int16Array(pcm.length) : pcm)
       return new Promise<Mic>((resolve) => (micResolve = resolve))
     },
   })

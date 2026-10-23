@@ -21,8 +21,11 @@ describe('NoiseMixer', () => {
   })
 
   it('adds noise at about -34 dBFS when light and -24 dBFS when heavy', () => {
-    expect(rms(noiseAlone('light'))).toBeCloseTo(0.02, 2)
-    expect(rms(noiseAlone('heavy'))).toBeCloseTo(0.063, 2)
+    // Within 5% of the target level, i.e. under half a decibel.
+    expect(rms(noiseAlone('light')) / 0.02).toBeGreaterThan(0.95)
+    expect(rms(noiseAlone('light')) / 0.02).toBeLessThan(1.05)
+    expect(rms(noiseAlone('heavy')) / 0.063).toBeGreaterThan(0.95)
+    expect(rms(noiseAlone('heavy')) / 0.063).toBeLessThan(1.05)
   })
 
   it('adds the noise to the speech rather than replacing it', () => {

@@ -13,7 +13,22 @@ export interface Mic {
 export type StartMic = (
   targetRate: number,
   onPcm: (pcm: Int16Array<ArrayBuffer>) => void,
+  /** Asked per batch: true while the caller's own sound must not be sent. */
+  muted: () => boolean,
 ) => Promise<Mic>
+
+/**
+ * One batch as it goes down the line: the caller's sound (silence while muted) with the
+ * line noise on top, as 16-bit PCM. Muting silences the caller, not the line, so the noise
+ * carries on through the agent's turn as it would on a real call.
+ */
+export function lineBatch(
+  samples: Float32Array<ArrayBuffer>,
+  muted: boolean,
+  noise: NoiseMixer,
+): Int16Array<ArrayBuffer> {
+  return floatToInt16(noise.mix(muted ? new Float32Array(samples.length) : samples))
+}
 
 /**
  * Captures the microphone, downsamples it to `targetRate`, mixes in any background line noise
@@ -22,7 +37,7 @@ export type StartMic = (
  * speakers is mostly removed before it reaches speech recognition. If any setup step
  * fails, everything already acquired is released before the error is rethrown.
  */
-export const startMic: StartMic = async (targetRate, onPcm) => {
+export const startMic: StartMic = async (targetRate, onPcm, muted) => {
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   })
@@ -46,7 +61,7 @@ export const startMic: StartMic = async (targetRate, onPcm) => {
     capture.port.onmessage = (event: MessageEvent<Float32Array>) => {
       pending.push(...downsampler.process(event.data))
       if (pending.length >= batchSize) {
-        onPcm(floatToInt16(noise.mix(Float32Array.from(pending))))
+        onPcm(lineBatch(Float32Array.from(pending), muted(), noise))
         pending = []
       }
     }

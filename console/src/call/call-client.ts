@@ -64,9 +64,9 @@ const browserDeps: CallDeps = {
  * One phone call over `/ws/call`: mic audio up, transcripts and agent speech down.
  *
  * Half duplex for now: while the agent is speaking (until its audio has actually played,
- * plus a short tail) the mic sends silence instead of sound, so the echo bot never answers
- * its own voice while Prisma still gets a continuous real-time stream. Barge-in (#10)
- * replaces this. A CallClient is single-use: create a new one per call.
+ * plus a short tail) the mic sends no caller sound, only any line noise, so the bot never
+ * answers its own voice while Prisma still gets a continuous real-time stream. Barge-in
+ * (#10) replaces this. A CallClient is single-use: create a new one per call.
  */
 export class CallClient {
   private socket: CallSocket | null = null
@@ -168,7 +168,11 @@ export class CallClient {
   private async openMic(): Promise<boolean> {
     let mic: Mic
     try {
-      mic = await this.deps.startMic(this.micRate, (pcm) => this.sendMic(pcm))
+      mic = await this.deps.startMic(
+        this.micRate,
+        (pcm) => this.sendMic(pcm),
+        () => this.muted(),
+      )
     } catch (error) {
       this.onEvent({ type: 'error', message: `Microphone unavailable: ${String(error)}` })
       this.socket?.close(1000)
@@ -184,10 +188,15 @@ export class CallClient {
     return true
   }
 
+  /** While the agent speaks, and until its audio has played: the mic sends no caller sound
+   * (only any line noise), so the agent never answers its own voice. */
+  private muted(): boolean {
+    return this.agentSpeaking || this.deps.now() < this.mutedUntil
+  }
+
   private sendMic(pcm: Int16Array<ArrayBuffer>): void {
     if (this.socket?.readyState !== SOCKET_OPEN) return
-    const muted = this.agentSpeaking || this.deps.now() < this.mutedUntil
-    this.socket.send(muted ? new ArrayBuffer(pcm.byteLength) : pcm.buffer)
+    this.socket.send(pcm.buffer)
   }
 
   private emitStatus(status: CallStatus): void {

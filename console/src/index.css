@@ -167,6 +167,23 @@ h1 {
   outline-offset: 2px;
 }
 
+/* Windows high-contrast drops the accent colour: mark the choice with a system colour. */
+@media (forced-colors: active) {
+  .noise label:has(input:checked) {
+    border: 2px solid Highlight;
+  }
+}
+
+/* Browsers without :has() cannot show which label is chosen: show the radios themselves. */
+@supports not selector(:has(*)) {
+  .noise input {
+    position: static;
+    opacity: 1;
+    width: auto;
+    height: auto;
+  }
+}
+
 button {
   font: inherit;
   font-size: 1.1rem;
