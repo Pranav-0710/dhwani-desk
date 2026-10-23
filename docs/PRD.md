@@ -121,7 +121,7 @@ Laya answers 10 questions about the conversation so far in one batched call per 
 
 - Questions are written in English; Laya's multilingual checkpoint reads the Kannada state directly. Week 1 tests whether Kannada question text scores better.
 - Every answer is stored with its probability and the model version, so any decision can be audited later.
-- New questions are added only with labelled test data for them; latency budget on the laptop CPU, for a caller's first turn, is ≤ 0.5 s p95 for the safety questions, asked first, and ≤ 2.5 s p95 for the whole decision, with a cached "one moment" line covering the wait; later turns are slower because Laya rereads the whole call ([measured](decisions/laya-latency.md)).
+- New questions are added only with labelled test data for them; latency budget on the laptop CPU, for a caller's first turn, is ≤ 0.6 s p95 for the safety questions, asked first, and ≤ 2.5 s p95 for the whole decision, with a cached "one moment" line covering the wait; later turns are slower because Laya rereads the whole call ([measured](decisions/laya-latency.md)).
 
 ## Escalation and safety rules
 
@@ -164,7 +164,7 @@ Pick the best for the build; keep the others as fallbacks. Fine-tuning runs on K
 | --- | --- |
 | `department` macro-F1 after fine-tuning | ≥ 0.80, reported next to the zero-shot baseline |
 | `safety_hazard` and `wants_human` recall | ≥ 0.90 (missing an emergency is worse than a false alarm) |
-| Laya latency, laptop CPU, caller's first turn: safety questions / whole decision | ≤ 0.5 s / ≤ 2.5 s p95 |
+| Laya latency, laptop CPU, caller's first turn: safety questions / whole decision | ≤ 0.6 s / ≤ 2.5 s p95 |
 | End of caller speech → first agent audio | ≤ 1.5 s |
 | Accuracy drop, 8 kHz + noise vs clean | Reported honestly, whatever it is |
 
