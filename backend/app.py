@@ -11,7 +11,7 @@ from audio.outbox import Outbox
 from audio.speaker import Speaker
 from audio.tts_cache import AudioCache, CachedSpeech
 from config import Settings, get_settings
-from dialogue.decision import Decider
+from dialogue.decision import Decider, Decision, Screening
 from dialogue.machine import Dialogue, Reply, State
 from dialogue.standin import KeywordDecider
 from dialogue.templates import load_templates
@@ -31,22 +31,42 @@ def get_ticket_store() -> TicketStore:
     return TicketStore(get_settings().database_path)
 
 
+@functools.cache
+def get_decider() -> Decider:
+    """One decider per process, loaded at startup: Laya takes seconds to load."""
+    settings = get_settings()
+    if settings.decider == "laya":
+        # Imported here so the keyword decider never needs Laya installed.
+        from decisions.laya import LayaDecider
+
+        return LayaDecider.load(settings)
+    return KeywordDecider()
+
+
+async def _purge_old_transcripts() -> None:
+    days = get_settings().transcript_retention_days
+    try:
+        purged = await asyncio.to_thread(get_ticket_store().purge_transcripts, days)
+    except Exception:
+        # One failed pass (a locked database) must not end retention for good.
+        logger.exception("Deleting old caller turns failed; trying again later")
+    else:
+        if purged:
+            logger.info("Deleted %d caller turns older than %d days", purged, days)
+
+
 async def _sweep_transcripts() -> None:
     while True:
-        days = get_settings().transcript_retention_days
-        try:
-            purged = await asyncio.to_thread(get_ticket_store().purge_transcripts, days)
-        except Exception:
-            # One failed pass (a locked database) must not end retention for good.
-            logger.exception("Deleting old caller turns failed; trying again later")
-        else:
-            if purged:
-                logger.info("Deleted %d caller turns older than %d days", purged, days)
         await asyncio.sleep(RETENTION_SWEEP_S)
+        await _purge_old_transcripts()
 
 
 @contextlib.asynccontextmanager
 async def lifespan(_: FastAPI):
+    # Both before the first call is accepted: no caller waits for the model, and turns past
+    # their retention are gone before any new ones arrive.
+    await asyncio.to_thread(get_decider)
+    await _purge_old_transcripts()
     sweeper = asyncio.create_task(_sweep_transcripts())
     try:
         yield
@@ -90,10 +110,10 @@ def create_tts_client(settings: Settings) -> TimbreClient:
 
 stt_stream_factory: Callable[[Settings], PrismaStream] = create_stt_stream
 tts_client_factory: Callable[[Settings], TimbreClient] = create_tts_client
-# Keyword rules until the fine-tuned Laya checkpoint is served (#15). One per process: a model
-# behind it should load once, not on every call.
-decider: Decider = KeywordDecider()
 turn_pause_s = TURN_PAUSE_S
+# When the rest of a decision takes longer than this after the safety step, the agent says
+# "one moment" (`hold_on`) so the caller is not left in silence.
+hold_on_after_s = 0.3
 # After the last line of a closed call has played, wait this long before hanging up.
 HANG_UP_GRACE_S = 0.5
 
@@ -149,9 +169,12 @@ async def call(websocket: WebSocket) -> None:
     """`/ws/stt` plus the agent: it greets, then answers every caller turn (dialogue/).
 
     Extra server → browser messages: `dialogue` (state, slots, ticket and the decision behind
-    each reply), `agent_text`, `agent_audio_start` (`sample_rate`), binary 16-bit mono PCM
-    frames, `agent_audio_end`, and `tts_error` (the call continues). When the agent closes the
-    call, `call_ended` (`reason`) follows its last line and the server hangs up.
+    each reply; `screening` instead of `decision` for a hand-off on the safety step, followed
+    by a `dialogue` with no `keys` once the full decision is in), `agent_text` (including
+    "one moment" while a slow decision runs), `agent_audio_start` (`sample_rate`), binary
+    16-bit mono PCM frames, `agent_audio_end`, and `tts_error` (the call continues). When the
+    agent closes the call, `call_ended` (`reason`) follows its last line and the server hangs
+    up.
     """
     await websocket.accept()
     settings = get_settings()
@@ -160,7 +183,7 @@ async def call(websocket: WebSocket) -> None:
         return
     outbox = Outbox(websocket)
     store = get_ticket_store()
-    dialogue = Dialogue(TEMPLATES, decider, store)
+    dialogue = Dialogue(TEMPLATES, get_decider(), store)
     turns = TurnCollector(turn_pause_s)
     config = {
         "type": "config",
@@ -190,41 +213,76 @@ async def call(websocket: WebSocket) -> None:
             agent_hung_up.set()
 
         async def answer(reply: Reply) -> None:
-            if not reply.keys:
-                return
+            if not reply.keys and reply.decision is None:
+                return  # nothing to say and nothing new to show
             await outbox.json(reply.to_client(dialogue.slots))
             for line in reply.lines:
                 speaker.say(line)
             if reply.state is State.CLOSED:
                 background.append(asyncio.create_task(hang_up(reply.reason)))
 
+        async def decide_holding_on(transcript: str, screening: Screening) -> Decision:
+            async def hold_on() -> None:
+                await asyncio.sleep(hold_on_after_s)
+                speaker.say(TEMPLATES.line("hold_on"))
+
+            timer = asyncio.create_task(hold_on())
+            try:
+                return await asyncio.to_thread(dialogue.decider.decide, transcript, screening)
+            finally:
+                timer.cancel()
+
+        async def record_turn(personal_id: float) -> None:
+            # Off the event loop: a disk write must not stall the audio of other calls.
+            await asyncio.to_thread(
+                store.record_turn,
+                dialogue.call_id,
+                len(dialogue.turns),
+                dialogue.turns[-1],
+                personal_id,
+            )
+
+        async def hand_off_on_failure() -> None:
+            logger.exception("Deciding a caller turn failed; handing off")
+            # No decision says whether the turn holds a personal number: mask as if it did.
+            await record_turn(1.0)
+            await answer(dialogue.decider_failed())
+
         async def answer_turns() -> None:
+            # Only the decider runs in threads (it may be slow); the dialogue changes here, on
+            # the event loop, so a call that ends while a decision is running files nothing.
             while True:
                 transcript = dialogue.hear(await turns.turns.get())
                 if transcript is None:
                     continue
                 try:
-                    # Only the decision runs in a thread (the decider may be slow); the dialogue
-                    # changes here, on the event loop, so a call that ends while a decision is
-                    # running files nothing.
-                    decision = await asyncio.to_thread(dialogue.decider.decide, transcript)
+                    screening = await asyncio.to_thread(dialogue.decider.screen, transcript)
                 except Exception:
-                    logger.exception("Deciding a caller turn failed; handing off")
-                    reply = dialogue.decider_failed()
-                    # No decision to say whether it holds a personal number: mask as if it did.
-                    personal_id = 1.0
-                else:
-                    reply = dialogue.respond(decision)
-                    personal_id = decision.contains_personal_id
-                # Off the event loop: a disk write must not stall the audio of other calls.
-                await asyncio.to_thread(
-                    store.record_turn,
-                    dialogue.call_id,
-                    len(dialogue.turns),
-                    dialogue.turns[-1],
-                    personal_id,
-                )
-                await answer(reply)
+                    await hand_off_on_failure()
+                    continue
+                if (handed_off := dialogue.screened(screening)) is not None:
+                    # Safety first: the turn is stored and the hand-off said before the rest is
+                    # decided, since a caller told to call 112 may hang up at once. Masked as if
+                    # it held a personal number, as no decision says otherwise yet. The rest
+                    # follows for the officer as a `dialogue` event with no lines.
+                    await record_turn(1.0)
+                    await answer(handed_off)
+                    try:
+                        decision = await asyncio.to_thread(
+                            dialogue.decider.decide, transcript, screening
+                        )
+                    except Exception:
+                        logger.exception("Completing a decision after a hand-off failed")
+                        continue
+                    await answer(dialogue.complete(decision))
+                    continue
+                try:
+                    decision = await decide_holding_on(transcript, screening)
+                except Exception:
+                    await hand_off_on_failure()
+                    continue
+                await record_turn(decision.contains_personal_id)
+                await answer(dialogue.respond(decision))
 
         async def converse(event: SttEvent) -> None:
             if agent_hung_up.is_set():

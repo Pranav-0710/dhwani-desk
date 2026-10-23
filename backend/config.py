@@ -36,6 +36,15 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./dhwani.db"
     transcript_retention_days: int = 7
 
+    # Who decides on the caller's words: keyword rules, or Laya (decisions/laya.py).
+    decider: Literal["keyword", "laya"] = "keyword"
+    hf_token: SecretStr = SecretStr("")
+    # A Hugging Face repo, or a local directory with the same layout.
+    laya_checkpoint_repo: str = "Dhwanidesk/dhwani-desk-laya"
+    # A tag or commit of the repo; required unless the checkpoint is a local directory.
+    laya_checkpoint_revision: str = ""
+    laya_threads: int = 8
+
     @field_validator("gnani_tts_voice", mode="before")
     @classmethod
     def _default_voice_when_blank(cls, value: object) -> object:
@@ -74,6 +83,13 @@ class Settings(BaseSettings):
     def _retention(cls, value: int) -> int:
         if value < 1:
             raise ValueError("TRANSCRIPT_RETENTION_DAYS must be at least 1")
+        return value
+
+    @field_validator("laya_threads")
+    @classmethod
+    def _threads(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("LAYA_THREADS must be at least 1")
         return value
 
     @property
