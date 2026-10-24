@@ -49,6 +49,36 @@ class Settings(BaseSettings):
     # turns /ws/console off: it can speak to callers.
     console_token: SecretStr = SecretStr("")
 
+    # Pages that may open the call sockets (/ws/stt, /ws/call), comma-separated, exactly as a
+    # browser sends them in its Origin header: scheme, host and port, no path. Browsers apply
+    # no CORS to WebSockets, so without this any open web page could stream on our Gnani key.
+    allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    # Browser sessions streaming to Prisma at once, across /ws/stt and /ws/call.
+    max_stt_sessions: int = 2
+
+    @field_validator("allowed_origins")
+    @classmethod
+    def _origins(cls, value: str) -> str:
+        origins = [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
+        for origin in origins:
+            scheme, _, host = origin.partition("://")
+            if scheme not in ("http", "https") or not host or "/" in host:
+                raise ValueError(
+                    f"ALLOWED_ORIGINS: {origin!r} is not an origin like https://example.com"
+                )
+        return ",".join(origins)
+
+    @field_validator("max_stt_sessions")
+    @classmethod
+    def _sessions(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("MAX_STT_SESSIONS must be at least 1")
+        return value
+
+    @property
+    def origins(self) -> frozenset[str]:
+        return frozenset(self.allowed_origins.split(",")) - {""}
+
     @field_validator("gnani_tts_voice", mode="before")
     @classmethod
     def _default_voice_when_blank(cls, value: object) -> object:

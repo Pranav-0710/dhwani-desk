@@ -31,6 +31,13 @@ uv run pytest -q
 
 `/ws/stt` relays browser audio to Gnani Prisma and transcripts back.
 
+Who may connect, to `/ws/stt` and `/ws/call` alike (every session spends Gnani credits):
+
+- **Only pages on `ALLOWED_ORIGINS`.** Browsers apply no CORS to WebSockets, so the server checks the `Origin` header itself before accepting. Any other page, or no `Origin` at all, is refused with HTTP 403 at the handshake. The default lets in the Vite dev server (`http://localhost:5173`, `http://127.0.0.1:5173`); add the tunnel's address when the phone page is served from it, e.g. `ALLOWED_ORIGINS=http://localhost:5173,https://hosapura.example.com`.
+- **At most `MAX_STT_SESSIONS` at once** (default 2), counted across both sockets. One more gets `error` ("The line is busy…") and a 1013 close, before Prisma is opened.
+
+A script can forge `Origin`, so the first rule only stops other web pages; the cap is what bounds a script that has the URL.
+
 Session contract:
 
 1. Server sends `config` (`sample_rate`) once Prisma has accepted the connection, then forwards Prisma's `connected`.
@@ -40,6 +47,7 @@ Session contract:
 5. The session ends with either:
    - `closed` (`by: "prisma"`, `code`, `reason`) and a 1000 close — Prisma ended it cleanly (e.g. its 15-minute cap); reconnect for a new session.
    - `error` (`message`) and a 1011 close — missing key, rejected key, Prisma unreachable or failed, or audio not sent in real time.
+   - `error` (`message`) and a 1013 close — the line is busy (`MAX_STT_SESSIONS`); try again later.
 
    A Prisma `error` event that is *not* followed by a close is recoverable; the session continues.
 
@@ -113,7 +121,7 @@ When the agent closes the call (ticket filed or request redirected), the server 
 
 A Timbre failure sends `tts_error` (`message`) before `agent_audio_end`; the call continues. Every `agent_audio_start` is followed by an `agent_audio_end`, because the phone page mutes its mic in between. When the call ends (browser leaves, or Prisma closes or fails), a line being spoken is cut off and queued lines are dropped. `config` also carries `tts_sample_rate`.
 
-The phone page in `console/` is the browser side of this route. To try a call without a microphone, `uv run python -m scripts.call_smoke` phones the running server with synthetic caller speech and prints the transcripts, decisions and agent lines with timings.
+The phone page in `console/` is the browser side of this route. To try a call without a microphone, `uv run python -m scripts.call_smoke` phones the running server with synthetic caller speech and prints the transcripts, decisions and agent lines with timings. It calls as the first page on `ALLOWED_ORIGINS` (`--origin` to change).
 
 ## Supervisor console (`/ws/console`, `/api/thresholds`)
 

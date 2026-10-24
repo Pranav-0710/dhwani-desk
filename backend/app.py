@@ -3,7 +3,7 @@ import contextlib
 import functools
 import hmac
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Path, Query, WebSocket, WebSocketDisconnect
@@ -128,6 +128,30 @@ OFFICER_COMMAND_TIMEOUT_S = 10.0
 # The calls in progress, and the consoles watching them.
 live_calls = LiveCalls()
 
+
+class SessionCount:
+    """Browser sessions streaming to Prisma right now: each one spends our Gnani credits."""
+
+    def __init__(self) -> None:
+        self.open = 0
+
+    @contextlib.contextmanager
+    def hold(self, limit: int) -> Iterator[bool]:
+        """Count one session while the block runs. Yields False, counting nothing, when
+        `limit` are already open."""
+        if self.open >= limit:
+            yield False
+            return
+        self.open += 1
+        try:
+            yield True
+        finally:
+            self.open -= 1
+
+
+stt_sessions = SessionCount()
+LINE_BUSY = {"type": "error", "message": "The line is busy; please try again in a minute"}
+
 TEMPLATES = load_templates()
 TTS_CACHE: AudioCache = {}
 
@@ -246,25 +270,28 @@ async def _carry_out(message: Any) -> dict[str, Any]:
 async def stt_proxy(websocket: WebSocket) -> None:
     """Relay browser audio to Prisma and Prisma's transcripts back to the browser.
 
-    Contract (see backend/README.md): after `config` and `connected` arrive, the browser
-    streams binary frames of 16-bit mono PCM at `config.sample_rate`, in real time, and may
-    send the text frame "flush". It receives JSON events; `closed` or `error` followed by a
-    close ends the session.
+    Contract (see backend/README.md): only pages on ALLOWED_ORIGINS may connect, and only
+    MAX_STT_SESSIONS at once across /ws/stt and /ws/call. After `config` and `connected`
+    arrive, the browser streams binary frames of 16-bit mono PCM at `config.sample_rate`, in
+    real time, and may send the text frame "flush". It receives JSON events; `closed` or
+    `error` followed by a close ends the session.
     """
-    await websocket.accept()
     settings = get_settings()
-    if not settings.gnani_api_key.get_secret_value():
-        await _fail(websocket, "GNANI_API_KEY is not set")
+    if not await _admit(websocket, settings):
         return
-    outbox = Outbox(websocket)
+    with stt_sessions.hold(settings.max_stt_sessions) as held:
+        if not held:
+            await _line_busy(websocket)
+            return
+        outbox = Outbox(websocket)
 
-    async def forward(event: SttEvent) -> None:
-        await outbox.json(event.to_client())
+        async def forward(event: SttEvent) -> None:
+            await outbox.json(event.to_client())
 
-    config = {"type": "config", "sample_rate": settings.gnani_stt_sample_rate}
-    final = await _stt_session(websocket, settings, outbox, config, forward)
-    if final:
-        await _send_and_close(websocket, *final)
+        config = {"type": "config", "sample_rate": settings.gnani_stt_sample_rate}
+        final = await _stt_session(websocket, settings, outbox, config, forward)
+        if final:
+            await _send_and_close(websocket, *final)
 
 
 @app.websocket("/ws/call")
@@ -279,20 +306,23 @@ async def call(websocket: WebSocket) -> None:
     agent closes the call, `call_ended` (`reason`) follows its last line and the server hangs
     up.
     """
-    await websocket.accept()
     settings = get_settings()
-    if not settings.gnani_api_key.get_secret_value():
-        await _fail(websocket, "GNANI_API_KEY is not set")
+    if not await _admit(websocket, settings):
         return
-    store = get_ticket_store()
-    dialogue = Dialogue(TEMPLATES, get_decider(), store)
-    # Every message the caller's browser gets is copied to the supervisor consoles.
-    outbox = Outbox(websocket, watch=functools.partial(live_calls.publish, dialogue.call_id))
-    live = live_calls.open(dialogue)
-    try:
-        await _converse(websocket, settings, outbox, store, dialogue, live)
-    finally:
-        live_calls.close(dialogue.call_id)
+    with stt_sessions.hold(settings.max_stt_sessions) as held:
+        if not held:
+            await _line_busy(websocket)
+            return
+        store = get_ticket_store()
+        dialogue = Dialogue(TEMPLATES, get_decider(), store)
+        # Every message the caller's browser gets is copied to the supervisor consoles.
+        watch = functools.partial(live_calls.publish, dialogue.call_id)
+        outbox = Outbox(websocket, watch=watch)
+        live = live_calls.open(dialogue)
+        try:
+            await _converse(websocket, settings, outbox, store, dialogue, live)
+        finally:
+            live_calls.close(dialogue.call_id)
 
 
 async def _converse(
@@ -571,6 +601,32 @@ async def _relay(
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _admit(websocket: WebSocket, settings: Settings) -> bool:
+    """Accept a call socket (/ws/stt, /ws/call), or close it and return False.
+
+    A page not on ALLOWED_ORIGINS is refused before the handshake completes: closing with
+    1008 before accepting makes the server answer HTTP 403, so the browser only sees a failed
+    connection. Origin stops other web pages, not a script that forges it; the session cap
+    bounds what such a script can spend.
+    """
+    origin = websocket.headers.get("origin")
+    if origin not in settings.origins:
+        logger.warning("Refused a call socket from origin %r", origin)
+        await websocket.close(code=1008)
+        return False
+    await websocket.accept()
+    if not settings.gnani_api_key.get_secret_value():
+        await _fail(websocket, "GNANI_API_KEY is not set")
+        return False
+    return True
+
+
+async def _line_busy(websocket: WebSocket) -> None:
+    logger.warning("Refused a call: all %d STT sessions are in use", stt_sessions.open)
+    # 1013: try again later.
+    await _send_and_close(websocket, LINE_BUSY, code=1013)
 
 
 async def _send_and_close(websocket: WebSocket, payload: dict[str, Any], code: int) -> None:
