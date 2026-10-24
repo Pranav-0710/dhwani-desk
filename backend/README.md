@@ -119,7 +119,7 @@ The phone page in `console/` is the browser side of this route. To try a call wi
 
 The console watches every live call and lets an officer step in (`dialogue/live.py`). It is off until `CONSOLE_TOKEN` is set, because it can speak to callers.
 
-1. The console's first message is `{"type": "hello", "token": "<CONSOLE_TOKEN>"}`, within 10 s. A wrong or missing token gets `error` and a close with 1008.
+1. The console's first message is `{"type": "hello", "token": "<CONSOLE_TOKEN>"}`, within 5 s. A wrong or missing token gets `error` and a close with 1008.
 2. It then gets `calls`: every live call (`call_id`, `started_at`, `state`, `reason`, `officer`, `slots`) and the escalation `thresholds` for the decision bars (also at `GET /api/thresholds`, from `decisions/thresholds.py`).
 3. As things happen: `call_started` (the same fields), `call_event` (`call_id`, and `event`: every JSON message that call's browser got, as listed above; no audio) and `call_closed` (`call_id`).
 
