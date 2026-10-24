@@ -149,6 +149,8 @@ def main() -> None:
     args = parser.parse_args()
     if not get_settings().gnani_api_key.get_secret_value():
         sys.exit("GNANI_API_KEY is not set in .env")
+    if not args.origin:
+        sys.exit("ALLOWED_ORIGINS is empty, so the backend refuses every call; pass --origin")
     asyncio.run(call(args.url, args.origin, args.lines or DEFAULT_LINES))
 
 

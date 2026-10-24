@@ -59,13 +59,18 @@ class Settings(BaseSettings):
     @field_validator("allowed_origins")
     @classmethod
     def _origins(cls, value: str) -> str:
-        origins = [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
-        for origin in origins:
+        origins = []
+        for entry in value.split(","):
+            # As browsers send it: lower case, and no port when it is the scheme's default.
+            origin = entry.strip().rstrip("/").lower()
+            if not origin:
+                continue
             scheme, _, host = origin.partition("://")
             if scheme not in ("http", "https") or not host or "/" in host:
                 raise ValueError(
-                    f"ALLOWED_ORIGINS: {origin!r} is not an origin like https://example.com"
+                    f"ALLOWED_ORIGINS: {entry.strip()!r} is not an origin like https://example.com"
                 )
+            origins.append(origin.removesuffix({"http": ":80", "https": ":443"}[scheme]))
         return ",".join(origins)
 
     @field_validator("max_stt_sessions")

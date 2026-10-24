@@ -34,7 +34,8 @@ uv run pytest -q
 Who may connect, to `/ws/stt` and `/ws/call` alike (every session spends Gnani credits):
 
 - **Only pages on `ALLOWED_ORIGINS`.** Browsers apply no CORS to WebSockets, so the server checks the `Origin` header itself before accepting. Any other page, or no `Origin` at all, is refused with HTTP 403 at the handshake. The default lets in the Vite dev server (`http://localhost:5173`, `http://127.0.0.1:5173`); add the tunnel's address when the phone page is served from it, e.g. `ALLOWED_ORIGINS=http://localhost:5173,https://hosapura.example.com`.
-- **At most `MAX_STT_SESSIONS` at once** (default 2), counted across both sockets. One more gets `error` ("The line is busy…") and a 1013 close, before Prisma is opened.
+- **At most `MAX_STT_SESSIONS` at once** (default 2), counted across both sockets. One more gets `error` ("The line is busy…") and a 1013 close, before Prisma is opened. The count is per process: `uvicorn --workers N` would allow N times as many.
+- **A session that sends no audio for 30 s is ended** with `error` and a 1008 close, so a socket left open and silent cannot hold a place. The phone page streams all the time, silence included. A phone that loses signal without closing keeps its place until uvicorn's ping gives up, about 40 s.
 
 A script can forge `Origin`, so the first rule only stops other web pages; the cap is what bounds a script that has the URL.
 
@@ -44,10 +45,11 @@ Session contract:
 2. **Start sending audio only after `connected`.** Send binary frames of 16-bit mono PCM at `config.sample_rate`, any size, **in real time**. Up to 3 s of backlog is drained slightly faster than real time; more than that ends the session with an `error`.
 3. Optional text frame `flush` pushes out a trailing partial frame.
 4. Server → client events: `processing`, `transcript` (`text`, `segment_index`, `audio_duration_ms`, `latency_ms`), `settings_updated`.
-5. The session ends with either:
+5. The session ends with one of:
    - `closed` (`by: "prisma"`, `code`, `reason`) and a 1000 close — Prisma ended it cleanly (e.g. its 15-minute cap); reconnect for a new session.
    - `error` (`message`) and a 1011 close — missing key, rejected key, Prisma unreachable or failed, or audio not sent in real time.
    - `error` (`message`) and a 1013 close — the line is busy (`MAX_STT_SESSIONS`); try again later.
+   - `error` (`message`) and a 1008 close — no audio for 30 s.
 
    A Prisma `error` event that is *not* followed by a close is recoverable; the session continues.
 

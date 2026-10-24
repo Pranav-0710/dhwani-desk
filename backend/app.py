@@ -151,6 +151,10 @@ class SessionCount:
 
 stt_sessions = SessionCount()
 LINE_BUSY = {"type": "error", "message": "The line is busy; please try again in a minute"}
+# A session that sends no audio this long is ended, so a socket left open and silent cannot
+# hold one of the few sessions. The phone page streams all the time, silence included.
+stt_quiet_s = 30.0
+WENT_QUIET = {"type": "error", "message": "No audio arrived for too long; call ended"}
 
 TEMPLATES = load_templates()
 TTS_CACHE: AudioCache = {}
@@ -549,6 +553,9 @@ async def _stt_session(
             if ended_by in ("browser", "agent"):
                 stream.discard_pending()
                 return None
+            if ended_by == "quiet":
+                stream.discard_pending()
+                return WENT_QUIET, 1008
         closed = {
             "type": "closed",
             "by": "prisma",
@@ -570,14 +577,27 @@ async def _relay(
     stop: asyncio.Event | None = None,
 ) -> str:
     """Pump audio up and events down until one side ends or `stop` is set; returns "browser",
-    "prisma" or "agent"."""
+    "prisma", "agent" or "quiet" (no audio for `stt_quiet_s`)."""
+    went_quiet = False
 
     async def pump_audio() -> None:
+        nonlocal went_quiet
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + stt_quiet_s
         while True:
-            message = await websocket.receive()
+            quiet = asyncio.timeout_at(deadline)
+            try:
+                async with quiet:
+                    message = await websocket.receive()
+            except TimeoutError:
+                if not quiet.expired():
+                    raise
+                went_quiet = True
+                return
             if message["type"] == "websocket.disconnect":
                 return
             if message.get("bytes"):
+                deadline = loop.time() + stt_quiet_s
                 await stream.send_audio(message["bytes"])
             elif message.get("text") == "flush":
                 await stream.flush()
@@ -595,7 +615,7 @@ async def _relay(
         for task in done:
             task.result()
         if audio in done:
-            return "browser"
+            return "quiet" if went_quiet else "browser"
         return "prisma" if events in done else "agent"
     finally:
         for task in tasks:
