@@ -11,7 +11,14 @@ Escalation comes first, in the order of the PRD's table: a safety risk wins over
 including "not a civic complaint", because a wrong redirect could leave someone hurt. The two
 escalations that need nothing but the decider's first step (danger or an emergency, then a
 request for an officer) happen on that step alone (`screened`), before the rest of the decision
-is made.
+is made. The thresholds are in decisions/thresholds.py.
+
+A handed-off call waits for an officer, who can take it over (`take_over`), have the agent say
+what they type (`officer_says`), and hand it back to the agent (`hand_back`). From then on only
+what the caller says after the hand-back can hand the call off again (danger, an emergency or a
+request for an officer: `escalation_text`); the officer has dealt with everything before it,
+and the decider, rereading the whole call, would otherwise hand it straight back. Routing and
+the ticket still come from the whole call.
 """
 
 import logging
@@ -21,31 +28,35 @@ from itertools import count
 from typing import Any, Protocol
 from uuid import uuid4
 
+from decisions.thresholds import (
+    DEPARTMENT_CONFIDENCE,
+    HAND_OFF_STATES,
+    HAS_LOCATION,
+    MAX_LOCATION_ASKS,
+    MAX_UNROUTED_TURNS,
+    OUT_OF_SCOPE,
+    REPEAT_COMPLAINT,
+    SAFETY_HAZARD,
+    WANTS_HUMAN,
+)
 from dialogue.decision import Decider, Decision, Screening
 from dialogue.templates import Templates
 from tickets.store import TicketRequest
 
 logger = logging.getLogger("dhwani.dialogue")
 
-# Thresholds from docs/PRD.md ("Escalation and safety rules", v1); they are tuned on the test
-# set later. A shared contract: the console and the eval harness read the same numbers.
-OUT_OF_SCOPE = 0.7
-SAFETY_HAZARD = 0.6
-WANTS_HUMAN = 0.7
-DEPARTMENT_CONFIDENCE = 0.6
-HAS_LOCATION = 0.5
-REPEAT_COMPLAINT = 0.5
-HAND_OFF_STATES = ("distressed", "abusive")
-# Turns without a confident department before handing off (PRD: "after 2 turns").
-MAX_UNROUTED_TURNS = 2
-# Times to ask for a location before handing off: a ticket nobody can find helps no one.
-MAX_LOCATION_ASKS = 2
+# Longest line an officer may have the agent say, in characters.
+MAX_OFFICER_LINE = 300
 
 
 class State(StrEnum):
     LISTENING = "listening"
-    HANDED_OFF = "handed_off"  # an officer has the call; the agent stays quiet
+    HANDED_OFF = "handed_off"  # for an officer; the agent says only what the officer types
     CLOSED = "closed"
+
+
+class OfficerError(ValueError):
+    """An officer action the call cannot take now (it is over, or not handed to them)."""
 
 
 @dataclass
@@ -77,13 +88,14 @@ class Reply:
     # Set instead of `decision` when the call was handed off on the decider's first step.
     screening: Screening | None = None
 
-    def to_client(self, slots: Slots) -> dict[str, Any]:
+    def to_client(self, slots: Slots, officer: bool = False) -> dict[str, Any]:
         """The `dialogue` event the browser and console receive."""
         return {
             "type": "dialogue",
             "keys": list(self.keys),
             "state": self.state.value,
             "reason": self.reason,
+            "officer": officer,  # an officer has taken the call
             "slots": asdict(slots),
             "ticket": asdict(self.ticket) if self.ticket else None,
             "decision": asdict(self.decision) if self.decision else None,
@@ -117,7 +129,9 @@ class Dialogue:
     call_id: str = field(default_factory=lambda: uuid4().hex)
     state: State = State.LISTENING
     reason: str | None = None  # why the call was handed off or closed
+    officer: bool = False  # an officer has taken the call
     slots: Slots = field(default_factory=Slots)
+    # Every caller turn, including those said while an officer had the call.
     turns: list[str] = field(default_factory=list)
     # The caller turns that gave the location, verbatim: what the field team reads.
     location_turns: list[str] = field(default_factory=list)
@@ -125,22 +139,82 @@ class Dialogue:
     _location_asks: int = 0
     _ward_asked: bool = False
     _apologised: bool = False
+    # How many turns had been said when an officer last handed the call back.
+    _handed_back_at: int | None = None
 
     def greet(self) -> Reply:
         return self._reply(("greeting",))
 
+    @property
+    def transcript(self) -> str:
+        """Everything the caller has said, as the decider reads it."""
+        return " ".join(self.turns)
+
+    def escalation_text(self) -> str | None:
+        """What can hand the call off: the whole call, or after a hand-back only what the
+        caller has said since (None while that is nothing)."""
+        if self._handed_back_at is None:
+            return self.transcript
+        return " ".join(self.turns[self._handed_back_at :]) or None
+
+    def take_over(self) -> Reply:
+        """An officer takes the call, handed off or not: the agent now says only what the
+        officer types. Nothing is said; the reply carries the new state."""
+        if self.state is State.CLOSED:
+            raise OfficerError("The call is over")
+        if self.state is State.LISTENING:
+            self.state, self.reason = State.HANDED_OFF, "taken_over"
+        self.officer = True
+        return self._reply((), reason=self.reason)
+
+    def officer_says(self, text: str) -> str:
+        """The line an officer typed, checked, for the agent to say."""
+        if self.state is not State.HANDED_OFF or not self.officer:
+            raise OfficerError("Take the call over before speaking on it")
+        line = " ".join(text.split())
+        if not line:
+            raise OfficerError("Nothing to say")
+        if len(line) > MAX_OFFICER_LINE:
+            raise OfficerError(f"Keep a line under {MAX_OFFICER_LINE} characters")
+        return line
+
+    def hand_back(self) -> Reply:
+        """The officer returns the call to the agent, which says it is carrying on. Decide on
+        the whole call next (`rethink`, or the call route's own steps): what the caller told
+        the officer counts too."""
+        if self.state is not State.HANDED_OFF:
+            raise OfficerError("Only a handed-off call can be handed back")
+        self.state, self.reason, self.officer = State.LISTENING, None, False
+        self._handed_back_at = len(self.turns)
+        # Fresh tries at what the agent could not get before the officer helped.
+        self._unrouted_turns = self._location_asks = 0
+        self._ward_asked = False
+        return self._reply(("hand_back",))
+
+    def rethink(self) -> Reply:
+        """Decide on the whole call so far, in one go, as `turn` does for a new turn."""
+        return self._answer() if self.turns else self._reply(())
+
     def turn(self, text: str) -> Reply:
-        """Hear and answer one caller turn in one go. The call route takes the same steps
-        (`hear`, `screened`, `respond`) one at a time, so the decider runs off the event loop
-        and the caller hears something while the slow step runs."""
-        transcript = self.hear(text)
-        if transcript is None:
+        """Hear and answer one caller turn in one go. The call route takes the same steps one
+        at a time (`hear`, `escalation_text`, `screened`, `respond`), so the decider runs off
+        the event loop and the caller hears something while the slow step runs."""
+        if self.hear(text) is None:
             return self._reply(())
+        return self._answer()
+
+    def _answer(self) -> Reply:
         handed_off = None
         try:
-            screening = self.decider.screen(transcript)
-            handed_off = self.screened(screening)
-            decision = self.decider.decide(transcript, screening)
+            escalation_text = self.escalation_text()
+            first = self.decider.screen(escalation_text) if escalation_text else None
+            handed_off = self.screened(first) if first else None
+            screening = (
+                first
+                if escalation_text == self.transcript
+                else self.decider.screen(self.transcript)
+            )
+            decision = self.decider.decide(self.transcript, screening)
         except Exception:
             logger.exception("The decider failed; handing the call to an officer")
             return handed_off or self.decider_failed()
@@ -151,11 +225,12 @@ class Dialogue:
 
     def hear(self, text: str) -> str | None:
         """Add a caller turn. Returns everything the caller has said, for the decider, or None
-        when there is nothing to decide (blank turn, or the call is handed off or closed)."""
-        if self.state is not State.LISTENING or not text.strip():
+        when there is nothing to decide: a blank turn, a closed call, or a turn said while the
+        call is handed off (kept, so the agent knows it after a hand-back)."""
+        if self.state is State.CLOSED or not text.strip():
             return None
         self.turns.append(text.strip())
-        return " ".join(self.turns)
+        return self.transcript if self.state is State.LISTENING else None
 
     def decider_failed(self) -> Reply:
         """Hand off rather than go quiet: the decider reads the whole call, so if it failed on
@@ -170,13 +245,17 @@ class Dialogue:
         deciding in one step or two never changes what the caller hears."""
         if self.state is not State.LISTENING:
             return self._reply(())
-        if screening.safety_hazard > SAFETY_HAZARD or screening.urgency == "emergency":
-            key = _safety_line(screening.out_of_scope)
-            return self._end(State.HANDED_OFF, (key,), "safety", screening=screening)
-        if screening.wants_human > WANTS_HUMAN:
-            return self._end(
-                State.HANDED_OFF, ("handoff_human",), "wants_human", screening=screening
-            )
+        if (rule := self._first_step_rule(screening)) is not None:
+            key, reason = rule
+            return self._end(State.HANDED_OFF, (key,), reason, screening=screening)
+        return None
+
+    def _first_step_rule(self, answers: Screening | Decision) -> tuple[str, str] | None:
+        """(line, reason) of the first escalation that the safety step's answers call for."""
+        if answers.safety_hazard > SAFETY_HAZARD or answers.urgency == "emergency":
+            return _safety_line(answers.out_of_scope), "safety"
+        if answers.wants_human > WANTS_HUMAN:
+            return "handoff_human", "wants_human"
         return None
 
     def complete(self, decision: Decision) -> Reply:
@@ -194,15 +273,18 @@ class Dialogue:
         # Before any hand-off, so the officer who takes over sees what is already known.
         self._remember(decision)
 
-        if decision.safety_hazard > SAFETY_HAZARD or decision.urgency == "emergency":
-            key = _safety_line(decision.out_of_scope)
-            return self._end(State.HANDED_OFF, (key,), "safety", decision)
-        if decision.wants_human > WANTS_HUMAN:
-            return self._end(State.HANDED_OFF, ("handoff_human",), "wants_human", decision)
-        if decision.caller_state in HAND_OFF_STATES:
-            return self._end(State.HANDED_OFF, ("handoff_calm",), decision.caller_state, decision)
-        if decision.out_of_scope > OUT_OF_SCOPE:
-            return self._end(State.CLOSED, ("redirect",), "out_of_scope", decision)
+        # After a hand-back, the full decision reads words the officer has already dealt with:
+        # only the first step, on what was said since, can hand the call off (`screened`).
+        if self._handed_back_at is None:
+            if (rule := self._first_step_rule(decision)) is not None:
+                key, reason = rule
+                return self._end(State.HANDED_OFF, (key,), reason, decision)
+            if decision.caller_state in HAND_OFF_STATES:
+                return self._end(
+                    State.HANDED_OFF, ("handoff_calm",), decision.caller_state, decision
+                )
+            if decision.out_of_scope > OUT_OF_SCOPE:
+                return self._end(State.CLOSED, ("redirect",), "out_of_scope", decision)
 
         opening = self._opening(decision)
         if self.slots.department is None:
