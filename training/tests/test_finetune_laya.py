@@ -228,7 +228,10 @@ def test_a_token_that_cannot_see_the_dataset_names_its_owner(
 
     class Hidden(PublishHub):
         def list_repo_refs(self, repo: str, repo_type: str = "model") -> SimpleNamespace:
-            raise RepositoryNotFoundError("404", response=None)
+            # Built without a response: its constructor's signature differs across versions.
+            error = RepositoryNotFoundError.__new__(RepositoryNotFoundError)
+            Exception.__init__(error, "404 Repository Not Found")
+            raise error
 
     monkeypatch.setenv("HF_TOKEN", "hf_test")
     monkeypatch.setattr(ft, "hub", lambda: Hidden({}))
