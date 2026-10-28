@@ -45,6 +45,12 @@ EXPORTER_COMMIT = "0d0c73e317724325b9a12dc9d7d376232b3e3b25"
 EXPORTER = "laya-dotnet/tools/export_onnx.py"
 # Published beside the graph: what the backend loads, and what the run was.
 PUBLISHED = ("tokenizer", "encoder", "questions.json", "train_report.json", "train_run.json")
+# A full run is published only if the exported graph, loaded as the backend loads it, gets at
+# least this share of the seed set's departments right and does not answer them all the same.
+# Zero-shot scored 0.25 macro-F1 (docs/decisions/laya-kannada-gate.md).
+MIN_DEPARTMENT_ACCURACY = 0.5
+MIN_DEPARTMENTS_PREDICTED = 3
+SEED_FILE = REPO / "data" / "seed" / "seed.jsonl"
 
 
 def laya_questions(names: tuple[str, ...] = LAYA_ANSWERS) -> dict[str, dict[str, Any]]:
@@ -164,9 +170,32 @@ def stage_upload(checkpoint: Path, export: Path, stage: Path) -> None:
             shutil.copy2(source, stage / name)
     # The exporter's copy of the config is the one the graph was checked against.
     shutil.copy2(export / "rl_agent_config.json", stage / "rl_agent_config.json")
-    shutil.copy2(checkpoint / "model.safetensors", stage / "model.safetensors")
+    link_or_copy(checkpoint / "model.safetensors", stage / "model.safetensors")
     for name in ("model.onnx", "model.onnx.data"):
-        shutil.copy2(export / name, stage / "onnx" / name)
+        link_or_copy(export / name, stage / "onnx" / name)
+
+
+def link_or_copy(source: Path, target: Path) -> None:
+    """A hard link where the filesystem allows one: the weights are over a gigabyte each."""
+    target.unlink(missing_ok=True)
+    try:
+        os.link(source, target)
+    except OSError:
+        shutil.copy2(source, target)
+
+
+def ready_to_publish(tag: str) -> None:
+    """Fail before hours of training, not after: the token reaches the repo and the tag is free."""
+    api = hub()
+    try:
+        user = api.whoami()["name"]
+        api.repo_info(MODEL_REPO)
+        tags = {t.name for t in api.list_repo_refs(MODEL_REPO).tags}
+    except Exception as exc:
+        raise SystemExit(f"Cannot reach {MODEL_REPO} with HF_TOKEN: {exc}") from exc
+    if tag in tags:
+        raise SystemExit(f"{MODEL_REPO} already has {tag!r}; choose a new --push-tag")
+    print(f"Will publish as {user} to {MODEL_REPO}, tag {tag}", flush=True)
 
 
 def publish(stage: Path, tag: str, note: str) -> str:
@@ -174,11 +203,66 @@ def publish(stage: Path, tag: str, note: str) -> str:
     api = hub()
     if tag in {t.name for t in api.list_repo_refs(MODEL_REPO).tags}:
         raise SystemExit(f"{MODEL_REPO} already has {tag!r}; choose a new --push-tag")
-    commit = api.upload_folder(
-        folder_path=str(stage), repo_id=MODEL_REPO, commit_message=f"Fine-tuned checkpoint {tag}"
-    )
+    try:
+        commit = api.upload_folder(
+            folder_path=str(stage),
+            repo_id=MODEL_REPO,
+            commit_message=f"Fine-tuned checkpoint {tag}",
+        )
+    except Exception as exc:
+        raise SystemExit(
+            f"Upload failed ({exc}). The checkpoint is staged in {stage}; upload it with\n"
+            f"  huggingface-cli upload {MODEL_REPO} {stage} .\n"
+            f"  huggingface-cli tag {MODEL_REPO} {tag}"
+        ) from exc
+    print(f"Uploaded {MODEL_REPO}@{commit.oid}", flush=True)
     api.create_tag(MODEL_REPO, tag=tag, revision=commit.oid, tag_message=note)
     return commit.oid
+
+
+def decode(answers: dict[str, Any]) -> dict[str, Any]:
+    """Laya's answers as the backend reads them (backend/decisions/laya.py)."""
+    labels = {}
+    for name in LAYA_ANSWERS:
+        answer, spec = answers[name], SCHEMA[name]
+        if spec["type"] == "noul":
+            labels[name] = answer["noul"] >= 0.5
+        elif spec["type"] == "choice":
+            labels[name] = answer["choice"]
+        else:
+            levels = answer["probabilities"]
+            labels[name] = spec["criteria"][int(max(levels, key=levels.get))]
+    return labels
+
+
+def score(rows: list[dict[str, Any]], predicted: list[dict[str, Any]]) -> dict[str, Any]:
+    report: dict[str, Any] = {"rows": len(rows), "note": "seed set: a load check, not the eval"}
+    for name in LAYA_ANSWERS:
+        pairs = [
+            (row["labels"][name], guess[name]) for row, guess in zip(rows, predicted, strict=True)
+        ]
+        entry: dict[str, Any] = {"accuracy": round(sum(g == p for g, p in pairs) / len(pairs), 3)}
+        if SCHEMA[name]["type"] == "noul":
+            entry["raised / true"] = f"{sum(p for _, p in pairs)} / {sum(g for g, _ in pairs)}"
+        report[name] = entry
+    report["departments_predicted"] = len({guess["department"] for guess in predicted})
+    return report
+
+
+def check_published(stage: Path, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Load the staged checkpoint with ONNXAgent, as the backend does, and score it on `rows`."""
+    from laya.onnx_agent import ONNXAgent
+
+    agent = ONNXAgent(str(stage), onnx_path=str(stage / "onnx" / "model.onnx"))
+    predicted = [decode(agent.system_one(row["text"], QUESTIONS)["answers"]) for row in rows]
+    return score(rows, predicted)
+
+
+def good_enough(report: dict[str, Any]) -> bool:
+    return (
+        report["department"]["accuracy"] >= MIN_DEPARTMENT_ACCURACY
+        and report["departments_predicted"] >= MIN_DEPARTMENTS_PREDICTED
+    )
 
 
 # --- steps --------------------------------------------------------------------------------
@@ -186,12 +270,19 @@ def publish(stage: Path, tag: str, note: str) -> str:
 
 def export_onnx(checkpoint: Path, work: Path) -> Path:
     """Export with the pinned upstream exporter, verified against PyTorch; returns its folder."""
-    source = work / "laya-src"
+    # One clone for every run in the session, without the repo's large LFS files.
+    source = work.parent / "laya-src"
+    git = {**os.environ, "GIT_LFS_SKIP_SMUDGE": "1"}
     if not source.exists():
         clone = ["git", "clone", "-q", "--filter=blob:none", EXPORTER_REPO, str(source)]
-        subprocess.run(clone, check=True)
-    subprocess.run(["git", "-C", str(source), "checkout", "-q", EXPORTER_COMMIT], check=True)
+        subprocess.run(clone, check=True, env=git)
+    checkout = ["git", "-C", str(source), "checkout", "-q", EXPORTER_COMMIT]
+    subprocess.run(checkout, check=True, env=git)
     out = work / "export"
+    out.mkdir(parents=True, exist_ok=True)
+    # The exporter compares its graph with PyTorch weights it finds beside its output, and
+    # failing that with whatever Laya checkpoint is in the Hugging Face cache: the base, not ours.
+    link_or_copy(checkpoint / "model.safetensors", out / "model.safetensors")
     export = [sys.executable, str(source / EXPORTER), str(checkpoint), "--out", str(out)]
     subprocess.run([*export, "--verify", "--force"], check=True)
     return out / checkpoint.name
@@ -206,6 +297,10 @@ def train(data: Path, base: str, out: Path, args: argparse.Namespace) -> dict[st
         grad_accum=args.grad_accum,
         # Options in a new order every epoch, so department is not learnt by position.
         shuffle_options=("choice",),
+        # ~1,600 held-out items to fit the temperatures on; Laya's default 400 leaves about
+        # five emergencies.
+        calib_max=1600,
+        calib_frac=0.07,
         seed=args.seed,
     )
     summary = dry_run(str(data), base, config)
@@ -233,6 +328,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.push_tag and (args.limit or args.dry_run or args.no_export):
         parser.error("--push-tag needs a full run: no --limit, --dry-run or --no-export")
+    if args.push_tag:
+        ready_to_publish(args.push_tag)
 
     started = time.monotonic()
     args.out.mkdir(parents=True, exist_ok=True)
@@ -267,13 +364,23 @@ def main() -> None:
 
     export = export_onnx(checkpoint, args.out)
     print(f"Exported and verified: {export}", flush=True)
-    if args.push_tag:
-        stage = args.out / "publish"
-        stage_upload(checkpoint, export, stage)
-        note = f"Fine-tuned on {dataset} from {BASE_REPO}@{BASE_REVISION}"
-        commit = publish(stage, args.push_tag, note)
-        print(f"Published {MODEL_REPO}@{commit} as {args.push_tag}", flush=True)
-        print(f"Backend: DECIDER=laya, LAYA_CHECKPOINT_REVISION={args.push_tag}", flush=True)
+    stage = args.out / "publish"
+    stage_upload(checkpoint, export, stage)
+    report = check_published(stage, read_jsonl(SEED_FILE))
+    (stage / "load_check.json").write_text(json.dumps(report, indent=2), "utf-8")
+    print(json.dumps(report, indent=2), flush=True)
+    if not args.push_tag:
+        return
+    if not good_enough(report):
+        raise SystemExit(
+            f"Not published: department accuracy {report['department']['accuracy']} over "
+            f"{report['departments_predicted']} departments is below the bar "
+            f"({MIN_DEPARTMENT_ACCURACY}, {MIN_DEPARTMENTS_PREDICTED}). Staged in {stage}."
+        )
+    note = f"Fine-tuned on {dataset} from {BASE_REPO}@{BASE_REVISION}"
+    commit = publish(stage, args.push_tag, note)
+    print(f"Published {MODEL_REPO}@{commit} as {args.push_tag}", flush=True)
+    print(f"Backend: DECIDER=laya, LAYA_CHECKPOINT_REVISION={args.push_tag}", flush=True)
 
 
 if __name__ == "__main__":

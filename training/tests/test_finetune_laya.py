@@ -130,3 +130,92 @@ def test_only_a_full_run_is_published(monkeypatch: pytest.MonkeyPatch, flag: lis
         ft.main()
 
     assert stopped.value.code == 2
+
+
+def test_a_yes_no_label_must_be_a_bool() -> None:
+    row = json.loads(json.dumps(SEED[0]))
+    row["labels"]["safety_hazard"] = "no"
+
+    with pytest.raises(SystemExit, match="safety_hazard='no'"):
+        ft.check_labels([row])
+
+
+def laya_answers(department: str, hazard: float, urgency: str) -> dict:
+    levels = {str(i): 0.1 for i in range(4)}
+    levels[str(ft.SCHEMA["urgency"]["criteria"].index(urgency))] = 0.7
+    answers = {name: {"noul": 0.1} for name in ft.LAYA_ANSWERS}
+    answers["safety_hazard"] = {"noul": hazard}
+    answers["department"] = {"choice": department}
+    answers["caller_state"] = {"choice": "calm"}
+    answers["urgency"] = {"probabilities": levels}
+    return answers
+
+
+def test_answers_are_read_as_the_backend_reads_them() -> None:
+    labels = ft.decode(laya_answers("roads", hazard=0.8, urgency="emergency"))
+
+    assert labels["department"] == "roads"
+    assert labels["safety_hazard"] is True
+    assert labels["urgency"] == "emergency"  # the most likely level, not the expected one
+    assert labels["wants_human"] is False
+
+
+def test_a_model_that_answers_one_department_is_not_published() -> None:
+    rows = SEED[:20]
+    right = [dict(row["labels"]) for row in rows]
+    collapsed = [dict(guess, department="water") for guess in right]
+
+    assert ft.good_enough(ft.score(rows, right))
+    assert not ft.good_enough(ft.score(rows, collapsed))
+
+
+class PublishHub(FakeHub):
+    def whoami(self) -> dict:
+        return {"name": "pranav"}
+
+    def repo_info(self, repo: str) -> None:
+        if repo != ft.MODEL_REPO:
+            raise AssertionError(repo)
+
+
+def test_publishing_is_checked_before_training(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ft, "hub", lambda: PublishHub({}))
+    ft.ready_to_publish("kn-ft-v1")
+
+    monkeypatch.setattr(ft, "hub", lambda: PublishHub({"kn-ft-v1": "old"}))
+    with pytest.raises(SystemExit, match="already has"):
+        ft.ready_to_publish("kn-ft-v1")
+
+
+def test_a_token_that_cannot_reach_the_repo_stops_before_training(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class NoAccess(PublishHub):
+        def repo_info(self, repo: str) -> None:
+            raise PermissionError("403")
+
+    monkeypatch.setattr(ft, "hub", lambda: NoAccess({}))
+
+    with pytest.raises(SystemExit, match="Cannot reach"):
+        ft.ready_to_publish("kn-ft-v1")
+
+
+def test_the_exporter_checks_against_our_weights(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(ft.subprocess, "run", lambda argv, **_: calls.append(argv))
+    checkpoint = tmp_path / "work" / "ckpt"
+    touch(checkpoint / "model.safetensors", "ours")
+    (tmp_path / "laya-src").mkdir()  # already cloned
+
+    export = ft.export_onnx(checkpoint, tmp_path / "work")
+
+    assert export == tmp_path / "work" / "export" / "ckpt"
+    # Beside the exporter's output, where it looks before the Hugging Face cache.
+    assert (tmp_path / "work" / "export" / "model.safetensors").read_text("utf-8") == "ours"
+    assert calls[0][-3:] == ["checkout", "-q", ft.EXPORTER_COMMIT]
+    assert calls[1][1:] == [
+        str(tmp_path / "laya-src" / ft.EXPORTER), str(checkpoint),
+        "--out", str(tmp_path / "work" / "export"), "--verify", "--force",
+    ]  # fmt: skip
