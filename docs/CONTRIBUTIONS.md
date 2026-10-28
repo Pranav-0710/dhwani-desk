@@ -8,7 +8,7 @@ Lakshmi Narasimman was away until 2026-10-16. In that time Jey Pranav also did t
 | --- | --- | --- |
 | Gnani integration | Prisma realtime STT client and proxy; Timbre TTS client and voice choice; browser call path | |
 | Dialogue and escalation | Dialogue state machine, Kannada reply templates, escalation order | |
-| Laya (benchmark, fine-tuning, serving) | Week-1 Kannada benchmark and go/no-go decision | |
+| Laya (benchmark, fine-tuning, serving) | Week-1 Kannada benchmark and go/no-go decision; fine-tuning run and checkpoint publishing | |
 | Data and evaluation | Decision schema, fictional wards, seed set; synthetic data generator with consistency and meaning checks | |
 | Console and phone UI | Phone page: browser mic capture and agent playback | |
 | Delivery (Docker, demo, posts, write-up) | Repo bootstrap, CI, PRD; Hugging Face organization and repos | |
@@ -28,3 +28,4 @@ Lakshmi Narasimman was away until 2026-10-16. In that time Jey Pranav also did t
 | 2026-10-13 | Jey Pranav | #36 | Hugging Face organization, private repos and token setup (#8) |
 | 2026-10-16 | Jey Pranav | #37 | Dialogue state machine with Kannada templates, escalation and hang-up (#9) |
 | 2026-10-16 | Jey Pranav | #39 | Two-person workflow: CODEOWNERS, required review, contributions backfill (#38) |
+| 2026-10-28 | Jey Pranav | #46 | Laya fine-tuning notebook: Kaggle run, ONNX export, load check, tagged checkpoint (#14) |
