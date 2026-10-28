@@ -115,10 +115,30 @@ def hub():
     return HfApi(token=os.environ.get("HF_TOKEN") or None)
 
 
+def token_owner(api: Any) -> str:
+    """Whose HF_TOKEN this is, or a stop with the reason it does not work."""
+    if not os.environ.get("HF_TOKEN"):
+        raise SystemExit("HF_TOKEN is empty: add it as a notebook secret and attach it")
+    try:
+        return api.whoami()["name"]
+    except Exception as exc:
+        raise SystemExit(f"HF_TOKEN is not a working Hugging Face token: {exc}") from exc
+
+
 def pinned_dataset(revision: str, create: bool) -> str:
     """The dataset commit behind the tag `revision`; with `create`, tag the current head."""
+    from huggingface_hub.errors import RepositoryNotFoundError
+
     api = hub()
-    refs = api.list_repo_refs(DATASET_REPO, repo_type="dataset")
+    try:
+        refs = api.list_repo_refs(DATASET_REPO, repo_type="dataset")
+    except RepositoryNotFoundError as exc:
+        # The Hub answers 404, not 403, for a private repo the token may not see.
+        raise SystemExit(
+            f"HF_TOKEN (user {token_owner(api)}) cannot see the private {DATASET_REPO}. Use a "
+            "token of a Dhwanidesk member: a classic write token, or a fine-grained one with "
+            "read and write access to the Dhwanidesk organization's repos."
+        ) from exc
     tags = {tag.name: tag.target_commit for tag in refs.tags}
     if revision in tags:
         return tags[revision]

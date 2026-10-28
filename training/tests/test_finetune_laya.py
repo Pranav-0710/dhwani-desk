@@ -219,3 +219,26 @@ def test_the_exporter_checks_against_our_weights(
         str(tmp_path / "laya-src" / ft.EXPORTER), str(checkpoint),
         "--out", str(tmp_path / "work" / "export"), "--verify", "--force",
     ]  # fmt: skip
+
+
+def test_a_token_that_cannot_see_the_dataset_names_its_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from huggingface_hub.errors import RepositoryNotFoundError
+
+    class Hidden(PublishHub):
+        def list_repo_refs(self, repo: str, repo_type: str = "model") -> SimpleNamespace:
+            raise RepositoryNotFoundError("404", response=None)
+
+    monkeypatch.setenv("HF_TOKEN", "hf_test")
+    monkeypatch.setattr(ft, "hub", lambda: Hidden({}))
+
+    with pytest.raises(SystemExit, match="user pranav\) cannot see the private"):
+        ft.pinned_dataset("v1.0", create=True)
+
+
+def test_an_empty_token_is_named_as_the_problem(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+
+    with pytest.raises(SystemExit, match="HF_TOKEN is empty"):
+        ft.token_owner(PublishHub({}))
