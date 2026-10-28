@@ -4,6 +4,8 @@ The challenge asks each team member's contribution to be documented, and teammat
 
 Lakshmi Narasimman was away until 2026-10-16. In that time Jey Pranav also did the B-owned issues #5–#8 (seed set, Laya benchmark, data generator, Hugging Face repos), so they are logged under Jey Pranav's name below.
 
+From 2026-10-28 Lakshmi Narasimman is away again, and Jey Pranav is doing the remaining B-owned issues (#13, #14, #18, #19, #20, #23, #24); they are logged under Jey Pranav's name too.
+
 | Area | Jey Pranav | Lakshmi Narasimman |
 | --- | --- | --- |
 | Gnani integration | Prisma realtime STT client and proxy; Timbre TTS client and voice choice; browser call path | |
