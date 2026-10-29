@@ -4,7 +4,7 @@ import dataclasses
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from fakes import NOTHING, ROADS, ROADS_IN_W04, ScriptedDecider
+from fakes import NOTHING, ROADS, ROADS_IN_W04, ScriptedDecider, isolated_settings
 from fastapi.testclient import TestClient
 
 import app as app_module
@@ -89,10 +89,19 @@ def test_transcripts_are_masked_and_deleted_after_the_retention_period(ticket_st
     assert len(ticket_store.tickets()) == 1  # tickets are kept
 
 
-def test_the_console_api_lists_and_finds_tickets(ticket_store) -> None:
+CONSOLE = {"Authorization": "Bearer console-test-token"}
+
+
+@pytest.fixture
+def console_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = isolated_settings(console_token="console-test-token")
+    monkeypatch.setattr(app_module, "get_settings", lambda: settings)
+
+
+def test_the_console_api_lists_and_finds_tickets(ticket_store, console_token) -> None:
     ticket_store.file(request())
     ticket_store.file(request(department="water"))
-    with TestClient(app_module.app) as client:
+    with TestClient(app_module.app, headers=CONSOLE) as client:
         listed = client.get("/api/tickets", params={"limit": 1}).json()
         assert [t["number"] for t in listed] == ["1002"]
         assert client.get("/api/tickets/1001").json()["department"] == "roads"
@@ -186,3 +195,28 @@ def test_a_failed_retention_pass_does_not_stop_later_ones(ticket_store, monkeypa
 
     asyncio.run(run_briefly())
     assert len(passes) >= 2
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},
+        {"Authorization": "Bearer wrong"},
+        {"Authorization": "console-test-token"},
+        {"Authorization": "Basic console-test-token"},
+    ],
+)
+def test_the_console_api_needs_the_console_token(ticket_store, console_token, headers) -> None:
+    ticket_store.file(request())
+    with TestClient(app_module.app, headers=headers) as client:
+        for route in ("/api/tickets", "/api/tickets/1001", "/api/thresholds"):
+            refused = client.get(route)
+            assert refused.status_code == 401
+            assert refused.headers["www-authenticate"] == "Bearer"
+            assert "roads" not in refused.text
+
+
+def test_the_console_api_is_off_without_a_token(ticket_store, monkeypatch) -> None:
+    monkeypatch.setattr(app_module, "get_settings", lambda: isolated_settings())
+    with TestClient(app_module.app, headers={"Authorization": "Bearer "}) as client:
+        assert client.get("/api/tickets").status_code == 503

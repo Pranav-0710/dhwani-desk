@@ -6,7 +6,16 @@ import logging
 from collections.abc import Awaitable, Callable, Iterator
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Path, Query, WebSocket, WebSocketDisconnect
+from fastapi import (
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Path,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+)
 
 from audio.outbox import Outbox
 from audio.speaker import Speaker
@@ -165,20 +174,40 @@ def health() -> dict[str, str]:
     return {"status": "ok", "version": app.version}
 
 
-@app.get("/api/tickets")
+def _is_console_token(offered: object) -> bool:
+    """Whether `offered` is CONSOLE_TOKEN; never true while it is unset."""
+    token = get_settings().console_token.get_secret_value()
+    if not token or not isinstance(offered, str):
+        return False
+    return hmac.compare_digest(offered.encode(), token.encode())
+
+
+def officers_only(authorization: str | None = Header(None)) -> None:
+    """The console's HTTP routes need the console's token, as `Authorization: Bearer <token>`:
+    tickets hold where callers live, and the tunnel makes the backend public."""
+    if not get_settings().console_token.get_secret_value():
+        raise HTTPException(status_code=503, detail="CONSOLE_TOKEN is not set")
+    scheme, _, offered = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not _is_console_token(offered.strip()):
+        raise HTTPException(
+            status_code=401, detail="Not allowed", headers={"WWW-Authenticate": "Bearer"}
+        )
+
+
+@app.get("/api/tickets", dependencies=[Depends(officers_only)])
 def list_tickets(limit: int = Query(50, ge=1, le=500)) -> list[dict[str, Any]]:
     """The newest tickets first, for the supervisor console."""
     return get_ticket_store().tickets(limit)
 
 
-@app.get("/api/tickets/{number}")
+@app.get("/api/tickets/{number}", dependencies=[Depends(officers_only)])
 def get_ticket(number: int = Path(ge=FIRST_NUMBER, le=2**31)) -> dict[str, Any]:
     if (ticket := get_ticket_store().ticket(number)) is None:
         raise HTTPException(status_code=404, detail="No such ticket")
     return ticket
 
 
-@app.get("/api/thresholds")
+@app.get("/api/thresholds", dependencies=[Depends(officers_only)])
 def get_thresholds() -> dict[str, Any]:
     """The escalation thresholds, for the console's decision bars."""
     return thresholds.as_dict()
@@ -204,8 +233,7 @@ async def console(websocket: WebSocket) -> None:
     except (TimeoutError, WebSocketDisconnect, KeyError, ValueError):
         hello = None
     is_hello = isinstance(hello, dict) and hello.get("type") == "hello"
-    offered = hello.get("token") if is_hello else None
-    if not isinstance(offered, str) or not hmac.compare_digest(offered.encode(), token.encode()):
+    if not _is_console_token(hello.get("token") if is_hello else None):
         await _send_and_close(websocket, {"type": "error", "message": "Not allowed"}, code=1008)
         return
 

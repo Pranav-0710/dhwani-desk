@@ -66,7 +66,9 @@ def test_a_console_sees_the_live_calls_and_thresholds_and_gets_answers(
         }
         ws.send_json({"type": "dance", "call_id": "nobody"})
         assert ws.receive_json()["message"] == "Unknown command"
-        assert client.get("/api/thresholds").json()["safety_hazard"] == thresholds.SAFETY_HAZARD
+        officer = {"Authorization": f"Bearer {TOKEN}"}
+        listed = client.get("/api/thresholds", headers=officer).json()
+        assert listed["safety_hazard"] == thresholds.SAFETY_HAZARD
 
 
 class ScriptedConsole:

@@ -1,0 +1,14 @@
+# Only backend/, console/ and data/ go into the images.
+**/.venv
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+console/dist
+training
+docs
+.git
+.github
+.env
+.env.*
+**/*.db
