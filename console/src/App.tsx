@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
+import { NOISE_LEVELS, type NoiseLevel } from './audio/noise'
 import { CallClient, type CallEvent, type CallStatus } from './call/call-client'
+
+const NOISE_LABEL: Record<NoiseLevel, string> = {
+  off: 'Off',
+  light: 'Quiet street',
+  heavy: 'Busy street',
+}
 
 type Line = { id: number; who: 'caller' | 'agent'; text: string; latencyMs?: number | null }
 
@@ -15,6 +22,7 @@ export default function App() {
   const [status, setStatus] = useState<CallStatus>('idle')
   const [lines, setLines] = useState<Line[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [noise, setNoise] = useState<NoiseLevel>('off')
   const client = useRef<CallClient | null>(null)
   const nextId = useRef(0)
 
@@ -50,12 +58,18 @@ export default function App() {
     setLines([])
     setError(null)
     client.current = new CallClient(onEvent)
+    client.current.setNoise(noise)
     client.current.start()
   }
 
   async function hangUp() {
     await client.current?.hangUp()
     client.current = null
+  }
+
+  function chooseNoise(level: NoiseLevel) {
+    setNoise(level)
+    client.current?.setNoise(level)
   }
 
   return (
@@ -86,6 +100,22 @@ export default function App() {
           </li>
         ))}
       </ol>
+
+      <fieldset className="noise">
+        <legend>Line noise</legend>
+        {NOISE_LEVELS.map((level) => (
+          <label key={level}>
+            <input
+              type="radio"
+              name="noise"
+              value={level}
+              checked={noise === level}
+              onChange={() => chooseNoise(level)}
+            />
+            {NOISE_LABEL[level]}
+          </label>
+        ))}
+      </fieldset>
 
       <button
         type="button"
