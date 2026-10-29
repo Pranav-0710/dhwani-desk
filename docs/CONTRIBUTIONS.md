@@ -12,7 +12,7 @@ From 2026-10-28 Lakshmi Narasimman is away again, and Jey Pranav is doing the re
 | Dialogue and escalation | Dialogue state machine, Kannada reply templates, escalation order; officer take-over and hand-back | |
 | Laya (benchmark, fine-tuning, serving) | Week-1 Kannada benchmark and go/no-go decision; ONNX serving in the call, safety-first decisions, latency report; fine-tuning run and checkpoint publishing | |
 | Data and evaluation | Decision schema, fictional wards, seed set; synthetic data generator with consistency and meaning checks | |
-| Console and phone UI | Phone page: browser mic capture and agent playback | |
+| Console and phone UI | Phone page: browser mic capture and agent playback; line noise toggle | |
 | Delivery (Docker, demo, posts, write-up) | Repo bootstrap, CI, PRD; Hugging Face organization and repos; call sockets locked down for the tunnel | |
 
 ## Log
@@ -34,4 +34,5 @@ From 2026-10-28 Lakshmi Narasimman is away again, and Jey Pranav is doing the re
 | 2026-10-23 | Jey Pranav | #42 | Laya serving: ONNX decider, safety questions first, "one moment" line, latency report (#15) |
 | 2026-10-23 | Jey Pranav | #43 | Officer take-over: console socket, typed replies spoken by Timbre, hand-back, thresholds API (#16) |
 | 2026-10-24 | Jey Pranav | #45 | Call sockets locked down: allowed pages only, two calls at a time, silent sockets hung up (#29) |
+| 2026-10-24 | Jey Pranav | #44 | Line noise toggle on the phone page: pink noise at two levels, kept on while the caller is muted (#11) |
 | 2026-10-28 | Jey Pranav | #46 | Laya fine-tuning notebook: Kaggle run, ONNX export, load check, tagged checkpoint (#14) |
