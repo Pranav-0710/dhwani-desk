@@ -10,10 +10,8 @@ Lakshmi Narasimman was away until 2026-10-16. In that time Jey Pranav also did t
 | Dialogue and escalation | Dialogue state machine, Kannada reply templates, escalation order; officer take-over and hand-back | |
 | Laya (benchmark, fine-tuning, serving) | Week-1 Kannada benchmark and go/no-go decision; ONNX serving in the call, safety-first decisions, latency report | |
 | Data and evaluation | Decision schema, fictional wards, seed set; synthetic data generator with consistency and meaning checks | |
-| Console and phone UI | Phone page: browser mic capture and agent playback | |
-| Delivery (Docker, demo, posts, write-up) | Repo bootstrap, CI, PRD; Hugging Face organization and repos; call sockets locked down for the tunnel | |
 | Console and phone UI | Phone page: browser mic capture and agent playback; line noise toggle | |
-| Delivery (Docker, demo, posts, write-up) | Repo bootstrap, CI, PRD; Hugging Face organization and repos | |
+| Delivery (Docker, demo, posts, write-up) | Repo bootstrap, CI, PRD; Hugging Face organization and repos; call sockets locked down for the tunnel | |
 
 ## Log
 
