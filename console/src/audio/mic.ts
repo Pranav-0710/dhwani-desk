@@ -1,24 +1,43 @@
+import { NoiseMixer, type NoiseLevel } from './noise'
 import { Downsampler, floatToInt16 } from './pcm'
 
 /** Send to the backend in ~40 ms batches rather than one tiny frame per 128-sample block. */
 const BATCH_SECONDS = 0.04
 
 export interface Mic {
+  /** Background line noise mixed into what is sent from now on (`noise.ts`). */
+  setNoise: (level: NoiseLevel) => void
   stop: () => Promise<void>
 }
 
 export type StartMic = (
   targetRate: number,
   onPcm: (pcm: Int16Array<ArrayBuffer>) => void,
+  /** Asked per batch: true while the caller's own sound must not be sent. */
+  muted: () => boolean,
 ) => Promise<Mic>
 
 /**
- * Captures the microphone, downsamples it to `targetRate` and hands over 16-bit PCM batches.
+ * One batch as it goes down the line: the caller's sound (silence while muted) with the
+ * line noise on top, as 16-bit PCM. Muting silences the caller, not the line, so the noise
+ * carries on through the agent's turn as it would on a real call.
+ */
+export function lineBatch(
+  samples: Float32Array<ArrayBuffer>,
+  muted: boolean,
+  noise: NoiseMixer,
+): Int16Array<ArrayBuffer> {
+  return floatToInt16(noise.mix(muted ? new Float32Array(samples.length) : samples))
+}
+
+/**
+ * Captures the microphone, downsamples it to `targetRate`, mixes in any background line noise
+ * and hands over 16-bit PCM batches.
  * Echo cancellation and noise suppression are on, so the agent's own voice from the
  * speakers is mostly removed before it reaches speech recognition. If any setup step
  * fails, everything already acquired is released before the error is rethrown.
  */
-export const startMic: StartMic = async (targetRate, onPcm) => {
+export const startMic: StartMic = async (targetRate, onPcm, muted) => {
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   })
@@ -35,19 +54,23 @@ export const startMic: StartMic = async (targetRate, onPcm) => {
     const source = context.createMediaStreamSource(stream)
     const capture = new AudioWorkletNode(context, 'pcm-capture', { numberOfOutputs: 0 })
     const downsampler = new Downsampler(context.sampleRate, targetRate)
+    const noise = new NoiseMixer()
     const batchSize = Math.round(targetRate * BATCH_SECONDS)
     let pending: number[] = []
 
     capture.port.onmessage = (event: MessageEvent<Float32Array>) => {
       pending.push(...downsampler.process(event.data))
       if (pending.length >= batchSize) {
-        onPcm(floatToInt16(Float32Array.from(pending)))
+        onPcm(lineBatch(Float32Array.from(pending), muted(), noise))
         pending = []
       }
     }
     source.connect(capture)
 
     return {
+      setNoise: (level) => {
+        noise.level = level
+      },
       stop: async () => {
         capture.port.onmessage = null
         source.disconnect()

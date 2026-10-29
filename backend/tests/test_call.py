@@ -143,7 +143,8 @@ def test_a_whole_call_ends_with_a_ticket(
     monkeypatch: pytest.MonkeyPatch, ticket_store: TicketStore
 ) -> None:
     use_dialogue_fakes(monkeypatch, FakeTts(), ScriptedDecider(ROADS_IN_W04))
-    browser = ScriptedBrowser([bytes(1024)], leave_when=ended_lines(3))
+    # The caller stays on the line until the agent hangs up, so the hang-up is what is tested.
+    browser = ScriptedBrowser([bytes(1024)], leave_when=lambda sent: False)
 
     asyncio.run(app_module.call(browser))
 
