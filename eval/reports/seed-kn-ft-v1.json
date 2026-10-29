@@ -5,7 +5,8 @@
    "n": 50,
    "department": {
     "accuracy": 0.9,
-    "macro_f1": 0.9122448979591836
+    "macro_f1": 0.9122448979591836,
+    "routed_macro_f1": 0.8913134484563054
    },
    "ward": {
     "accuracy": 0.98
@@ -52,10 +53,16 @@
     "raised": 2,
     "true": 2
    },
+   "safety_handoff": {
+    "recall": 0.6666666666666666,
+    "precision": 0.9090909090909091,
+    "raised": 11,
+    "true": 15
+   },
    "latency": {
-    "safety_step_p95_s": 1.3799999578623101e-05,
-    "whole_decision_p95_s": 9.189999946102034e-05,
-    "whole_decision_median_s": 2.525000036257552e-05
+    "safety_step_p95_s": 6.70000008540228e-06,
+    "whole_decision_p95_s": 3.549999928509351e-05,
+    "whole_decision_median_s": 2.5100000129896216e-05
    },
    "mistakes": [
     {
@@ -97,12 +104,13 @@
   }
  },
  "zero-shot": {
-  "revision": "laya:multilingual@local",
+  "revision": "laya:multilingual@local sha256:39f5bdad0299f9e7",
   "text": {
    "n": 50,
    "department": {
     "accuracy": 0.3,
-    "macro_f1": 0.2523519163763066
+    "macro_f1": 0.2523519163763066,
+    "routed_macro_f1": 0.15317460317460316
    },
    "ward": {
     "accuracy": 1.0
@@ -149,10 +157,16 @@
     "raised": 2,
     "true": 2
    },
+   "safety_handoff": {
+    "recall": 0.06666666666666667,
+    "precision": 1.0,
+    "raised": 1,
+    "true": 15
+   },
    "latency": {
-    "safety_step_p95_s": 0.3926071999994747,
-    "whole_decision_p95_s": 1.1837835000005725,
-    "whole_decision_median_s": 1.0519965499997852
+    "safety_step_p95_s": 0.6709908000011637,
+    "whole_decision_p95_s": 2.2768228000004456,
+    "whole_decision_median_s": 1.134790899998734
    },
    "mistakes": [
     {
@@ -404,12 +418,13 @@
   }
  },
  "fine-tuned": {
-  "revision": "laya:ckpt-kn-ft-v1@local",
+  "revision": "laya:ckpt-kn-ft-v1@local sha256:d1e0deee3f1508d6",
   "text": {
    "n": 50,
    "department": {
     "accuracy": 0.88,
-    "macro_f1": 0.8832548403976974
+    "macro_f1": 0.8832548403976974,
+    "routed_macro_f1": 0.9034229076245882
    },
    "ward": {
     "accuracy": 1.0
@@ -456,10 +471,16 @@
     "raised": 2,
     "true": 2
    },
+   "safety_handoff": {
+    "recall": 1.0,
+    "precision": 0.9375,
+    "raised": 16,
+    "true": 15
+   },
    "latency": {
-    "safety_step_p95_s": 0.3847349000006943,
-    "whole_decision_p95_s": 1.148236499999257,
-    "whole_decision_median_s": 1.04646645000048
+    "safety_step_p95_s": 0.45506899999963935,
+    "whole_decision_p95_s": 1.385393300000942,
+    "whole_decision_median_s": 1.2009142999995674
    },
    "mistakes": [
     {

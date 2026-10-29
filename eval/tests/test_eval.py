@@ -55,13 +55,13 @@ def test_a_decision_is_scored_on_the_thresholds_the_call_acts_on() -> None:
     assert labels["safety_hazard"] is False  # exactly at the threshold is not acted on
     assert labels["has_location"] is True
     assert labels["wants_human"] is True
-    assert label_errors(labels) == []
+    assert label_errors({k: v for k, v in labels.items() if k != run.ROUTED}) == []
 
 
 def test_the_keyword_stand_in_runs_through_both_steps() -> None:
     labels, safety_s, whole_s = run.predict(run.keyword_decider(), SEED[0]["text"])
 
-    assert label_errors(labels) == []
+    assert label_errors({k: v for k, v in labels.items() if k != run.ROUTED}) == []
     assert 0 <= safety_s <= whole_s
 
 
@@ -122,6 +122,52 @@ def test_the_sheet_corrections_are_applied_and_checked() -> None:
     sheet[0]["fix"] = "department=electricity"
     with pytest.raises(SystemExit, match="electricity"):
         build.corrected(draft, sheet)
+
+
+def test_the_sheet_must_cover_the_draft_once() -> None:
+    draft = SEED[:2]
+    line = {"kannada": "", "fix": ""}
+
+    with pytest.raises(SystemExit, match="not the sheet"):
+        build.corrected(draft, [{"id": draft[0]["id"], **line}])
+    with pytest.raises(SystemExit, match="twice"):
+        build.corrected(draft, [{"id": r["id"], **line} for r in (*draft, draft[0])])
+    with pytest.raises(SystemExit, match="not the draft"):
+        build.corrected(draft, [{"id": r["id"], **line} for r in draft] + [{"id": "x", **line}])
+
+
+def test_a_department_counts_only_when_the_call_would_route_it() -> None:
+    from dialogue.decision import Decision
+
+    unsure = Decision(
+        department="roads", department_confidence=0.4, ward="unknown", urgency="emergency",
+        safety_hazard=0.1, has_location=0.0, repeat_complaint=0.0, wants_human=0.0,
+        caller_state="calm", out_of_scope=0.0, contains_personal_id=0.0,
+    )  # fmt: skip
+    gold = {**SEED[0], "labels": {**SEED[0]["labels"], "department": "roads"}}
+
+    labels = run.labels_of(unsure)
+    result = run.score([gold], [labels])
+
+    assert labels["department"] == "roads"
+    assert labels[run.ROUTED] == run.UNROUTED
+    assert result["department"]["macro_f1"] == 1.0
+    assert result["department"]["routed_macro_f1"] == 0.0
+    assert result["safety_handoff"]["raised"] == 1  # an emergency hands off without a hazard
+
+
+def test_spoken_conditions_are_scored_on_the_same_sentences() -> None:
+    rows = SEED[:3]
+    transcripts = {
+        rows[0]["id"]: {"prisma_16k": "a", "prisma_8k_noise": "b"},
+        rows[1]["id"]: {"prisma_16k": "c"},
+    }
+
+    by_condition = run.inputs(rows, transcripts)
+
+    assert len(by_condition["text"]) == 3
+    assert [r["id"] for r, _ in by_condition["prisma_16k"]] == [rows[0]["id"]]
+    assert [r["id"] for r, _ in by_condition["prisma_8k_noise"]] == [rows[0]["id"]]
 
 
 def test_the_manifest_pins_the_set_without_its_text() -> None:

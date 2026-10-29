@@ -32,8 +32,11 @@ export it first with the upstream exporter, as `training/finetune_laya.py` (#14)
 
 The seed set was shown to the data generator as examples, so it is not held out: it ranks
 deciders, it does not measure accuracy. `reports/seed-kn-ft-v1.md` is the first comparison, run on
-local copies of the base model's ONNX export and of `Dhwanidesk/dhwani-desk-laya@kn-ft-v1`
-(commit 93922417d3).
+local copies of the base model's ONNX export and of `kn-ft-v1`; a local checkpoint is named in the
+report by a hash of its ONNX weights.
+
+A department counts only when its confidence is high enough for the call to route it, and the
+`safety_hazard` row sits next to the call's actual safety hand-off (a hazard or an emergency).
 
 ## Held-out test set
 
@@ -41,16 +44,19 @@ local copies of the base model's ONNX export and of `Dhwanidesk/dhwani-desk-laya
    `Your Kannada (if changed)`, labels in `Fix labels` as `hazard=yes; urgency=urgent`, or `DROP`.
 2. Build and upload it:
    ```bash
-   uv run --with openpyxl python ../eval/build_test_set.py \
+   uv run --with openpyxl --with huggingface_hub python ../eval/build_test_set.py \
        --sheet ../training/out/review/test-set-draft-v1.xlsx \
        --draft ../training/out/review/test-set-draft-v1.json --push
    ```
-3. Record it (a quiet room, a laptop mic, the reader's usual pace):
+3. Record it (a quiet room, a laptop mic, the reader's usual pace). A sentence corrected after it
+   was recorded comes up again:
    ```bash
    uv run --with sounddevice python ../eval/record.py --test-file ../eval/out/test.jsonl
    ```
 4. Transcribe it. This spends Prisma credits, about 150 clips × 2 × their length; a stopped run
-   carries on where it left off:
+   carries on where it left off, and a failed clip is tried again on the next run. `--only 16k`
+   or `--only 8k` runs one condition. Recordings made elsewhere must be 16-bit mono WAVs, each
+   with an `<id>.json` beside it holding the sentence's `sha256_16`, as `record.py` writes:
    ```bash
    uv run python ../eval/transcribe.py
    ```
@@ -58,8 +64,11 @@ local copies of the base model's ONNX export and of `Dhwanidesk/dhwani-desk-laya
    ```bash
    uv run python ../eval/run.py --set test --test-file ../eval/out/test.jsonl \
        --transcripts ../eval/out/transcripts.jsonl \
+       --laya zero-shot=path/to/laya-multilingual-onnx \
        --laya fine-tuned=Dhwanidesk/dhwani-desk-laya@kn-ft-v1
    ```
+   The 16 kHz and 8 kHz scores use only the sentences both have, so the drop compares like
+   with like.
 
 ## Tests
 

@@ -15,6 +15,7 @@ Writes `eval/reports/<name>.md` and `.json`; numbers are never typed by hand.
 """
 
 import argparse
+import hashlib
 import json
 import statistics
 import sys
@@ -24,7 +25,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from common import REPORTS, SCHEMA, SEED_FILE, label_errors, read_jsonl
+from common import REPORTS, SCHEMA, SEED_FILE, fingerprint, label_errors, read_jsonl
 
 CONDITIONS = ("text", "prisma_16k", "prisma_8k_noise")
 CONDITION_LABEL = {
@@ -34,13 +35,7 @@ CONDITION_LABEL = {
 }
 FLAGS = [name for name, spec in SCHEMA.items() if spec["type"] == "noul"]
 CHOICES = [name for name, spec in SCHEMA.items() if spec["type"] != "noul"]
-PRD_TARGETS = {
-    "department_macro_f1": 0.80,
-    "safety_hazard_recall": 0.90,
-    "wants_human_recall": 0.90,
-    "safety_step_p95_s": 0.6,
-    "whole_decision_p95_s": 2.5,
-}
+ROUTED, UNROUTED = "routed_department", "unrouted"
 
 
 # --- deciders ------------------------------------------------------------------------------
@@ -65,11 +60,25 @@ def laya_decider(source: str) -> Any:
             "laya_checkpoint_revision": revision,
         }
     )
-    return LayaDecider.load(settings)
+    decider = LayaDecider.load(settings)
+    if Path(source).is_dir():
+        # A local copy is named only by its directory, so the report pins it by its weights.
+        decider.revision += f" sha256:{weights_hash(Path(source) / 'onnx')}"
+    return decider
+
+
+def weights_hash(onnx_dir: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(onnx_dir.glob("model.onnx*")):
+        with path.open("rb") as f:
+            while block := f.read(1 << 20):
+                digest.update(block)
+    return digest.hexdigest()[:16]
 
 
 def labels_of(decision: Any) -> dict[str, Any]:
-    """A Decision as the test set's labels: yes past the threshold the call acts on."""
+    """A Decision as the test set's labels: yes past the threshold the call acts on. Also the
+    department the call would route to: none below the confidence it needs to act."""
     from decisions import thresholds
 
     cut = {
@@ -82,6 +91,8 @@ def labels_of(decision: Any) -> dict[str, Any]:
     }
     labels = {name: getattr(decision, name) > cut[name] for name in FLAGS}
     labels |= {name: getattr(decision, name) for name in CHOICES}
+    routed = decision.department_confidence >= thresholds.DEPARTMENT_CONFIDENCE
+    labels[ROUTED] = decision.department if routed else UNROUTED
     return labels
 
 
@@ -98,10 +109,11 @@ def predict(decider: Any, text: str) -> tuple[dict[str, Any], float, float]:
 
 
 def macro_f1(gold: list[str], guess: list[str], classes: list[str]) -> float:
-    """Over the classes that occur in `gold`, so a class the set never asks about is not a 0."""
+    """Over the `classes` that occur in `gold` or `guess`: a class the set never asks about
+    is not a 0, but guessing it when the set never asks still costs."""
     scores = []
     for c in classes:
-        if c not in gold:
+        if c not in gold and c not in guess:
             continue
         tp = sum(g == c and p == c for g, p in zip(gold, guess, strict=True))
         fp = sum(g != c and p == c for g, p in zip(gold, guess, strict=True))
@@ -128,11 +140,21 @@ def score(rows: list[dict[str, Any]], guesses: list[dict[str, Any]]) -> dict[str
         guess = [g[name] for g in guesses]
         entry = {"accuracy": sum(a == b for a, b in zip(gold, guess, strict=True)) / len(rows)}
         if name == "department":
-            entry["macro_f1"] = macro_f1(gold, guess, list(SCHEMA[name]["criteria"]))
+            classes = list(SCHEMA[name]["criteria"])
+            entry["macro_f1"] = macro_f1(gold, guess, classes)
+            entry["routed_macro_f1"] = macro_f1(gold, [g[ROUTED] for g in guesses], classes)
         result[name] = entry
     for name in FLAGS:
         result[name] = flag_scores([r["labels"][name] for r in rows], [g[name] for g in guesses])
+    result["safety_handoff"] = flag_scores(
+        [safety_handoff(r["labels"]) for r in rows], [safety_handoff(g) for g in guesses]
+    )
     return result
+
+
+def safety_handoff(labels: dict[str, Any]) -> bool:
+    """The call hands off with the safety line on a hazard or on an emergency."""
+    return labels["safety_hazard"] or labels["urgency"] == "emergency"
 
 
 def p95(values: list[float]) -> float:
@@ -144,16 +166,14 @@ def p95(values: list[float]) -> float:
 
 
 def inputs(rows: list[dict[str, Any]], transcripts: dict[str, dict[str, str]]) -> dict[str, list]:
-    """For each condition, the (row, text) pairs that have that version of the sentence."""
+    """For each condition, the (row, text) pairs that have that version of the sentence. The
+    spoken conditions keep only the sentences both have, so the drop compares like with like."""
     by_condition: dict[str, list] = {"text": [(r, r["text"]) for r in rows]}
-    for condition in CONDITIONS[1:]:
-        pairs = [
-            (r, transcripts[r["id"]][condition])
-            for r in rows
-            if condition in transcripts.get(r["id"], {})
-        ]
-        if pairs:
-            by_condition[condition] = pairs
+    spoken = [c for c in CONDITIONS[1:] if any(c in t for t in transcripts.values())]
+    both = [r for r in rows if all(c in transcripts.get(r["id"], {}) for c in spoken)]
+    for condition in spoken:
+        if both:
+            by_condition[condition] = [(r, transcripts[r["id"]][condition]) for r in both]
     return by_condition
 
 
@@ -184,7 +204,7 @@ def evaluate(
             ]
             results[name][condition] = entry
             print(
-                f"{name} / {condition}: department macro-F1 {entry['department']['macro_f1']:.2f}",
+                f"{name} / {condition}: department macro-F1 {entry['department']['routed_macro_f1']:.2f}",
                 flush=True,
             )
     return results
@@ -197,52 +217,64 @@ def fmt(value: float | None, digits: int = 2) -> str:
     return "—" if value is None else f"{value:.{digits}f}"
 
 
+def recall_cell(s: dict[str, Any]) -> str:
+    return f"{fmt(s['recall'])} ({s['raised']} raised, {s['true']} true)"
+
+
 def headline(results: dict[str, Any], spoken: str) -> list[str]:
-    """The PRD's table, for the decider called "fine-tuned" (else the first one)."""
-    best = "fine-tuned" if "fine-tuned" in results else next(iter(results))
-    base = "zero-shot" if "zero-shot" in results else None
-    main = results[best].get(spoken) or results[best]["text"]
-    cond = spoken if spoken in results[best] else "text"
+    """The PRD's table, one column per decider."""
+    from decisions.thresholds import DEPARTMENT_CONFIDENCE
+
+    names = list(results)
+    cond = spoken if all(spoken in results[n] for n in names) else "text"
     lines = [
-        f"Measured on: {CONDITION_LABEL[cond]}, {main['n']} sentences. Decider: `{best}` ({results[best]['revision']}).",
+        f"Measured on: {CONDITION_LABEL[cond]}, {results[names[0]][cond]['n']} sentences. "
+        f"A department counts only when the call would route it (confidence ≥ "
+        f"{DEPARTMENT_CONFIDENCE:.2f}); a flag counts past the threshold the call acts on.",
         "",
-        "| Metric | Target | Result |",
-        "| --- | --- | --- |",
+        "| Metric | Target | " + " | ".join(f"`{n}`" for n in names) + " |",
+        "| --- | --- |" + " --- |" * len(names),
     ]
-    f1 = main["department"]["macro_f1"]
-    zero = (
-        f" (zero-shot {fmt(results[base][cond]['department']['macro_f1'])})"
-        if base and cond in results[base]
-        else ""
-    )
-    lines.append(
-        f"| `department` macro-F1 | ≥ {PRD_TARGETS['department_macro_f1']:.2f} | {fmt(f1)}{zero} |"
-    )
-    for flag in ("safety_hazard", "wants_human"):
-        s = main[flag]
+
+    def row(label: str, target: str, cell: Callable[[dict[str, Any]], str]) -> None:
         lines.append(
-            f"| `{flag}` recall | ≥ 0.90 | {fmt(s['recall'])} ({s['raised']} raised, {s['true']} true) |"
+            f"| {label} | {target} | " + " | ".join(cell(results[n]) for n in names) + " |"
         )
-    lat = main["latency"]
-    timed = (
-        f"{fmt(lat['safety_step_p95_s'])} s / {fmt(lat['whole_decision_p95_s'])} s"
-        if str(results[best]["revision"]).startswith("laya:")
-        else "— (not a Laya decider)"
+
+    def latency(r: dict[str, Any]) -> str:
+        if not str(r["revision"]).startswith("laya:"):
+            return "—"
+        lat = r[cond]["latency"]
+        return f"{fmt(lat['safety_step_p95_s'])} s / {fmt(lat['whole_decision_p95_s'])} s"
+
+    def drop(r: dict[str, Any]) -> str:
+        clean, noisy = r.get("prisma_16k"), r.get("prisma_8k_noise")
+        if not (clean and noisy):
+            return "needs `transcribe.py`"
+        a, b = clean["department"]["routed_macro_f1"], noisy["department"]["routed_macro_f1"]
+        return f"{fmt(a - b)} ({fmt(a)} → {fmt(b)}, {clean['n']} sentences)"
+
+    row("`department` macro-F1", "≥ 0.80", lambda r: fmt(r[cond]["department"]["routed_macro_f1"]))
+    row("`safety_hazard` recall", "≥ 0.90", lambda r: recall_cell(r[cond]["safety_hazard"]))
+    row("`wants_human` recall", "≥ 0.90", lambda r: recall_cell(r[cond]["wants_human"]))
+    row(
+        "Safety hand-off recall (hazard or emergency)",
+        "",
+        lambda r: recall_cell(r[cond]["safety_handoff"]),
     )
-    lines.append(
-        f"| Laya latency, safety step / whole decision (p95, this machine) | ≤ 0.6 s / ≤ 2.5 s | {timed} |"
+    row(
+        "Laya latency p95, safety step / whole decision (this machine)",
+        "≤ 0.6 s / ≤ 2.5 s",
+        latency,
     )
-    lines.append(
-        "| End of caller speech → first agent audio | ≤ 1.5 s | not measured here: `backend/scripts/call_smoke.py` (#22) |"
-    )
-    clean, noisy = results[best].get("prisma_16k"), results[best].get("prisma_8k_noise")
-    if clean and noisy:
-        drop = clean["department"]["macro_f1"] - noisy["department"]["macro_f1"]
-        lines.append(
-            f"| Accuracy drop, 8 kHz + noise vs clean (department macro-F1) | reported | {fmt(drop)} ({fmt(clean['department']['macro_f1'])} → {fmt(noisy['department']['macro_f1'])}) |"
-        )
-    else:
-        lines.append("| Accuracy drop, 8 kHz + noise vs clean | reported | needs `transcribe.py` |")
+    row("Department macro-F1 drop, 8 kHz + noise vs 16 kHz", "reported", drop)
+    lines += [
+        "",
+        "End of caller speech → first agent audio (≤ 1.5 s) is measured by "
+        "`backend/scripts/call_smoke.py` (#22), not here.",
+        "",
+        "Revisions: " + "; ".join(f"`{n}` = `{results[n]['revision']}`" for n in names) + ".",
+    ]
     return lines
 
 
@@ -253,18 +285,19 @@ def detail(results: dict[str, Any]) -> list[str]:
         conds = [c for c in CONDITIONS if c in by_condition]
         lines.append("| | " + " | ".join(CONDITION_LABEL[c] for c in conds) + " |")
         lines.append("| --- |" + " --- |" * len(conds))
-        lines.append(
-            "| department macro-F1 | "
-            + " | ".join(fmt(by_condition[c]["department"]["macro_f1"]) for c in conds)
-            + " |"
-        )
+        for key, label in (("routed_macro_f1", "routed"), ("macro_f1", "any confidence")):
+            lines.append(
+                f"| department macro-F1, {label} | "
+                + " | ".join(fmt(by_condition[c]["department"][key]) for c in conds)
+                + " |"
+            )
         for q in CHOICES:
             lines.append(
                 f"| {q} accuracy | "
                 + " | ".join(fmt(by_condition[c][q]["accuracy"]) for c in conds)
                 + " |"
             )
-        for q in FLAGS:
+        for q in [*FLAGS, "safety_handoff"]:
             cells = []
             for c in conds:
                 s = by_condition[c][q]
@@ -341,6 +374,16 @@ def main() -> None:
     if bad:
         raise SystemExit(f"Labels that do not fit the schema: {bad}")
     transcripts = {t["id"]: t for t in read_jsonl(args.transcripts)} if args.transcripts else {}
+    texts = {r["id"]: r["text"] for r in rows}
+    stale = sorted(
+        i
+        for i, t in transcripts.items()
+        if i in texts and t.get("sha256_16") != fingerprint(texts[i])
+    )
+    if stale:
+        raise SystemExit(
+            f"Recorded from another version of the sentence: {stale}. Record them again."
+        )
 
     deciders: dict[str, Callable[[], Any]] = {}
     if not args.no_keyword:

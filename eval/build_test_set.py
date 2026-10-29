@@ -78,6 +78,13 @@ def corrected(
 ) -> tuple[list[dict], list[str]]:
     """The draft with the sheet's corrections; also what was dropped or changed, for the log."""
     by_id = {row["id"]: row for row in draft}
+    ids = [line["id"] for line in sheet]
+    if twice := sorted({i for i in ids if ids.count(i) > 1}):
+        raise SystemExit(f"In the sheet twice: {twice}")
+    if unknown := sorted(set(ids) - set(by_id)):
+        raise SystemExit(f"In the sheet but not the draft: {unknown}")
+    if missing := sorted(set(by_id) - set(ids)):
+        raise SystemExit(f"In the draft but not the sheet (write DROP to leave one out): {missing}")
     rows, log = [], []
     for line in sheet:
         row = json.loads(json.dumps(by_id[line["id"]]))
