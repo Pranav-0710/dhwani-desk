@@ -9,7 +9,7 @@ dhwani-desk/
 │   ├── gnani/          # Prisma stream client, Timbre client (thin interfaces)
 │   ├── audio/          # resample to 8 kHz, noise injection, barge-in
 │   ├── dialogue/       # state machine + Kannada reply templates
-│   ├── decisions/      # Laya schema, router, thresholds
+│   ├── decisions/      # Laya serving: the questions, ward and number detectors, thresholds
 │   ├── tickets/        # SQLite models, masking, retention
 │   └── tests/
 ├── console/            # React + TS + Vite: phone UI + supervisor console

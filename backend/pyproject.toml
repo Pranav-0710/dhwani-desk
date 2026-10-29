@@ -17,6 +17,10 @@ dev = [
     "pytest>=8.3",
     "ruff>=0.8",
 ]
+# The Laya runtime, for DECIDER=laya: `uv sync --group laya`. Tests use a stand-in for Laya.
+laya = [
+    "laya[onnx]==0.4.6",
+]
 
 [tool.uv]
 package = false
