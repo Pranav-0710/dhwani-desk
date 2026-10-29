@@ -1,0 +1,431 @@
+/* The supervisor console. Colours come from the tokens in index.css. */
+
+:root {
+  --alert: #b3261e;
+  --alert-bg: #fdecea;
+  --warn: #8a5a00;
+  --bar-bg: #e8ebef;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --alert: #f2b8b5;
+    --alert-bg: #3b1d1b;
+    --warn: #f0c36b;
+    --bar-bg: #2c343f;
+  }
+}
+
+.supervisor {
+  width: 100%;
+  max-width: 1280px;
+  min-height: 100vh;
+  padding: 20px 16px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--surface);
+}
+
+.sv-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.sv-status {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.sv-status-connected {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.sv-status-refused,
+.sv-status-closed {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.sv-alert,
+.sv-call-alert {
+  margin: 0;
+  padding: 12px 16px;
+  border-radius: 8px;
+  border: 2px solid var(--alert);
+  background: var(--alert-bg);
+  color: var(--alert);
+  font-weight: 600;
+  text-align: left;
+}
+
+button.sv-alert {
+  font-size: 1rem;
+}
+
+.sv-main {
+  display: grid;
+  grid-template-columns: minmax(200px, 260px) 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.sv-calls h2,
+.sv-call h2,
+.sv-tickets h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.sv-calls ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sv-call-item {
+  width: 100%;
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 400;
+  text-align: left;
+}
+
+.sv-call-item.is-current {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.sv-call-item.is-waiting {
+  border-color: var(--alert);
+  box-shadow: inset 3px 0 0 var(--alert);
+}
+
+.sv-call-item.is-ended {
+  opacity: 0.65;
+}
+
+.sv-call-time,
+.sv-call-state {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.sv-call {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  min-width: 0;
+}
+
+.sv-empty {
+  color: var(--muted);
+}
+
+.sv-call-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.sv-ticket-chip,
+.sv-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  margin-right: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.sv-ticket-chip {
+  color: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.sv-urgency-urgent {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.sv-urgency-emergency {
+  color: var(--alert);
+  border-color: var(--alert);
+  font-weight: 600;
+}
+
+.sv-transcript {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sv-line {
+  padding: 8px 10px;
+  border-radius: 8px;
+  display: grid;
+  gap: 2px;
+  max-width: 85%;
+}
+
+.sv-line .text {
+  line-height: 1.5;
+}
+
+.sv-caller {
+  background: var(--caller);
+  align-self: flex-end;
+}
+
+.sv-agent {
+  background: var(--agent);
+  align-self: flex-start;
+}
+
+.sv-officer {
+  background: var(--agent);
+  align-self: flex-start;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.sv-bars h3 {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+}
+
+.sv-chips {
+  margin: 0 0 8px;
+}
+
+.sv-bars ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.sv-bars li {
+  display: grid;
+  grid-template-columns: minmax(120px, 220px) 1fr 3.5ch;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.85rem;
+}
+
+.sv-bar {
+  position: relative;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--bar-bg);
+  overflow: visible;
+}
+
+.sv-bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.sv-bars li.is-alarm .sv-bar-fill {
+  background: var(--alert);
+}
+
+.sv-bars li.is-alarm .sv-bar-label {
+  color: var(--alert);
+  font-weight: 600;
+}
+
+.sv-bars li.is-met .sv-bar-label {
+  font-weight: 600;
+}
+
+.sv-bar-mark {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  background: var(--text);
+}
+
+.sv-bar-value {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.sv-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.sv-controls button,
+.sv-say button,
+.sv-gate button {
+  padding: 10px 18px;
+  font-size: 1rem;
+}
+
+.sv-say {
+  flex: 1;
+  display: flex;
+  gap: 8px;
+  min-width: 240px;
+}
+
+.sv-say input,
+.sv-gate input,
+.sv-filters select {
+  font: inherit;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.sv-say input {
+  flex: 1;
+  min-width: 0;
+}
+
+button.sv-secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sv-tickets-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: end;
+  gap: 12px;
+}
+
+.sv-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sv-filters label,
+.sv-gate label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.sv-table-wrap {
+  overflow-x: auto;
+  margin-top: 8px;
+}
+
+.sv-tickets table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.sv-tickets th,
+.sv-tickets td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.sv-tickets th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.sv-gate {
+  width: 100%;
+  max-width: 420px;
+  margin-top: 15vh;
+  padding: 24px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .sv-main {
+    grid-template-columns: 1fr;
+  }
+
+  .sv-bars li {
+    grid-template-columns: 1fr 3.5ch;
+  }
+
+  .sv-bar {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+/* Windows high contrast drops the fills: keep bars, marks and alerts visible. */
+@media (forced-colors: active) {
+  .sv-bar {
+    border: 1px solid CanvasText;
+  }
+
+  .sv-bar-fill {
+    background: Highlight;
+  }
+
+  .sv-bar-mark {
+    background: CanvasText;
+  }
+
+  .sv-alert,
+  .sv-call-alert,
+  .sv-call-item.is-waiting {
+    border: 2px solid Mark;
+  }
+}
