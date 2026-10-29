@@ -47,28 +47,42 @@ def test_a_console_without_the_right_token_is_refused(console_settings: None, he
 
 
 def test_a_console_sees_the_live_calls_and_thresholds_and_gets_answers(
-    console_settings: None,
+    monkeypatch: pytest.MonkeyPatch, console_settings: None
 ) -> None:
-    with TestClient(app_module.app) as client, client.websocket_connect("/ws/console") as ws:
-        ws.send_json({"type": "hello", "token": TOKEN})
-        assert ws.receive_json() == {
-            "type": "calls",
-            "calls": [],
-            "thresholds": thresholds.as_dict(),
-        }
-        ws.send_json({"type": "take_over", "call_id": "nobody", "id": 7})
-        assert ws.receive_json() == {
+    monkeypatch.setattr(app_module, "live_calls", app_module.LiveCalls())
+    script = iter(
+        [
+            [{"type": "take_over", "call_id": "nobody", "id": 7}],
+            [{"type": "dance", "call_id": "nobody"}],
+            [None],
+        ]
+    )
+    # Driven directly, as the take-over tests are: TestClient can cancel the app mid-flight
+    # when the test leaves the socket.
+    console = ScriptedConsole(lambda message: next(script))
+
+    asyncio.run(asyncio.wait_for(app_module.console(console), 5))
+
+    assert console.got == [
+        {"type": "calls", "calls": [], "thresholds": thresholds.as_dict()},
+        {
             "type": "error",
             "message": "No such call",
             "command": "take_over",
             "call_id": "nobody",
             "id": 7,
-        }
-        ws.send_json({"type": "dance", "call_id": "nobody"})
-        assert ws.receive_json()["message"] == "Unknown command"
-        officer = {"Authorization": f"Bearer {TOKEN}"}
+        },
+        {
+            "type": "error",
+            "message": "Unknown command",
+            "command": "dance",
+            "call_id": "nobody",
+        },
+    ]
+    officer = {"Authorization": f"Bearer {TOKEN}"}
+    with TestClient(app_module.app) as client:
         listed = client.get("/api/thresholds", headers=officer).json()
-        assert listed["safety_hazard"] == thresholds.SAFETY_HAZARD
+    assert listed["safety_hazard"] == thresholds.SAFETY_HAZARD
 
 
 class ScriptedConsole:
