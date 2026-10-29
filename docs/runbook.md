@@ -22,11 +22,13 @@ docker compose up --build
 ```
 
 - Phone: http://localhost:8080. Press **Call** and speak Kannada. A browser only allows the microphone on `localhost` or `https`.
-- Console: http://localhost:8080/supervisor, with `CONSOLE_TOKEN`.
+- Console: http://localhost:8080/supervisor, with `CONSOLE_TOKEN` (the page arrives with #47, the supervisor console).
 - Logs: `docker compose logs -f backend`.
 - Stop: `docker compose down`. Tickets stay in the `tickets` volume. `docker compose down -v` deletes them.
 
-With `DECIDER=laya` the first start downloads the checkpoint (about 1.3 GB) and loads it for about 15 s before the backend reports healthy. The console container waits for that.
+With `DECIDER=laya` the first start downloads the checkpoint (about 1.3 GB, kept on the `tickets` volume) and loads it for about 15 s before the backend reports healthy. The console container waits up to 10 minutes for that; later starts only load it.
+
+Needs Docker Compose 2.24 or newer (for the optional `.env`).
 
 ## 3. Share it with a Cloudflare quick tunnel
 
@@ -46,7 +48,7 @@ A quick tunnel gives a temporary `https://<random>.trycloudflare.com` address fo
    ALLOWED_ORIGINS=http://localhost:8080,https://quiet-river-1234.trycloudflare.com
    ```
 
-   Then restart the backend so it reads it: `docker compose up -d backend`.
+   Then restart the backend so it reads it: `docker compose up -d backend`. A value exported in your shell wins over `.env`, so unset `ALLOWED_ORIGINS` there if it does not take.
 4. Open the address on a phone or another laptop: the phone page at `/`, the console at `/supervisor`.
 5. When the demo is over, stop `cloudflared` (Ctrl+C). The address stops working at once, and the next tunnel gets a new one: update `ALLOWED_ORIGINS` again.
 
@@ -61,6 +63,10 @@ Anyone with the address can reach the app, and every call spends Gnani credits, 
 - **The backend's port is not published.** Only the console container reaches it.
 
 A script can forge the `Origin` header. The call cap and the silence limit are what bound it, so keep the tunnel up only while it is being used.
+
+Also:
+- The tunnel's address is hard to guess but is not a secret: anyone it is shared with can call.
+- Cloudflare ends TLS for the tunnel, so the console token passes through it. Change `CONSOLE_TOKEN` after a public demo.
 
 ## When something is wrong
 

@@ -216,7 +216,14 @@ def test_the_console_api_needs_the_console_token(ticket_store, console_token, he
             assert "roads" not in refused.text
 
 
-def test_the_console_api_is_off_without_a_token(ticket_store, monkeypatch) -> None:
+@pytest.mark.parametrize("route", ["/api/tickets", "/api/tickets/1001", "/api/thresholds"])
+def test_the_console_api_is_off_without_a_token(ticket_store, monkeypatch, route) -> None:
     monkeypatch.setattr(app_module, "get_settings", lambda: isolated_settings())
     with TestClient(app_module.app, headers={"Authorization": "Bearer "}) as client:
-        assert client.get("/api/tickets").status_code == 503
+        assert client.get(route).status_code == 503
+
+
+def test_the_bearer_scheme_is_case_insensitive(ticket_store, console_token) -> None:
+    headers = {"Authorization": "bearer  console-test-token "}
+    with TestClient(app_module.app, headers=headers) as client:
+        assert client.get("/api/thresholds").status_code == 200
