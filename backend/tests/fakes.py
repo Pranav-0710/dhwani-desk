@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 import app as app_module
 from config import Settings
-from dialogue.decision import Decision
+from dialogue.decision import Decision, Screening
 from gnani.prisma import SttEvent
 
 
@@ -146,15 +146,31 @@ ROADS_IN_W04 = dataclasses.replace(ROADS, ward="w04", has_location=0.9)
 
 class ScriptedDecider:
     """Returns the queued decisions in order (raising any queued exception) and records what
-    it was asked about."""
+    it was asked about. `screen` answers from the next decision; `decide` hands it over."""
+
+    revision = "scripted"
 
     def __init__(self, *decisions: Decision | Exception) -> None:
         self.decisions = list(decisions)
         self.transcripts: list[str] = []
+        self.decided: list[str] = []  # transcripts that got past the safety step
 
-    def decide(self, transcript: str) -> Decision:
+    def screen(self, transcript: str) -> Screening:
         self.transcripts.append(transcript)
-        decision = self.decisions.pop(0)
+        decision = self.decisions[0]
         if isinstance(decision, Exception):
+            self.decisions.pop(0)
             raise decision
+        return screening_of(decision)
+
+    def decide(self, transcript: str, screening: Screening) -> Decision:
+        self.decided.append(transcript)
+        decision = self.decisions.pop(0)
+        assert isinstance(decision, Decision) and screening == screening_of(decision)
         return decision
+
+
+def screening_of(decision: Decision) -> Screening:
+    return Screening(
+        decision.safety_hazard, decision.urgency, decision.wants_human, decision.out_of_scope
+    )
