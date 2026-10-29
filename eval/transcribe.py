@@ -2,7 +2,7 @@
 
 For every `eval/out/audio/<id>.wav` (record.py), streams the audio to Prisma in real time, as
 the call does, twice: at 16 kHz as recorded, and at 8 kHz with the phone page's heavy line noise
-(audio.phone_line). Writes `eval/out/transcripts.jsonl`, one row per sentence:
+(line_audio.phone_line). Writes `eval/out/transcripts.jsonl`, one row per sentence:
 `{id, prisma_16k, prisma_8k_noise}`. Runs again pick up where they stopped.
 
 Usage, from backend/: uv run python ../eval/transcribe.py [--only 16k|8k]
@@ -14,8 +14,8 @@ import asyncio
 import json
 from pathlib import Path
 
-from audio import phone_line, read_wav, to_pcm16, write_wav
 from common import OUT, read_jsonl
+from line_audio import phone_line, read_wav, to_pcm16, write_wav
 
 AUDIO = OUT / "audio"
 TRANSCRIPTS = OUT / "transcripts.jsonl"

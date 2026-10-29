@@ -58,7 +58,11 @@ def laya_decider(source: str) -> Any:
 
     repo, _, revision = source.partition("@")
     settings = get_settings().model_copy(
-        update={"decider": "laya", "laya_checkpoint_repo": repo, "laya_checkpoint_revision": revision}
+        update={
+            "decider": "laya",
+            "laya_checkpoint_repo": repo,
+            "laya_checkpoint_revision": revision,
+        }
     )
     return LayaDecider.load(settings)
 
@@ -142,7 +146,11 @@ def inputs(rows: list[dict[str, Any]], transcripts: dict[str, dict[str, str]]) -
     """For each condition, the (row, text) pairs that have that version of the sentence."""
     by_condition: dict[str, list] = {"text": [(r, r["text"]) for r in rows]}
     for condition in CONDITIONS[1:]:
-        pairs = [(r, transcripts[r["id"]][condition]) for r in rows if condition in transcripts.get(r["id"], {})]
+        pairs = [
+            (r, transcripts[r["id"]][condition])
+            for r in rows
+            if condition in transcripts.get(r["id"], {})
+        ]
         if pairs:
             by_condition[condition] = pairs
     return by_condition
@@ -174,7 +182,10 @@ def evaluate(
                 if r["labels"]["department"] != g["department"]
             ]
             results[name][condition] = entry
-            print(f"{name} / {condition}: department macro-F1 {entry['department']['macro_f1']:.2f}", flush=True)
+            print(
+                f"{name} / {condition}: department macro-F1 {entry['department']['macro_f1']:.2f}",
+                flush=True,
+            )
     return results
 
 
@@ -198,18 +209,37 @@ def headline(results: dict[str, Any], spoken: str) -> list[str]:
         "| --- | --- | --- |",
     ]
     f1 = main["department"]["macro_f1"]
-    zero = f" (zero-shot {fmt(results[base][cond]['department']['macro_f1'])})" if base and cond in results[base] else ""
-    lines.append(f"| `department` macro-F1 | ≥ {PRD_TARGETS['department_macro_f1']:.2f} | {fmt(f1)}{zero} |")
+    zero = (
+        f" (zero-shot {fmt(results[base][cond]['department']['macro_f1'])})"
+        if base and cond in results[base]
+        else ""
+    )
+    lines.append(
+        f"| `department` macro-F1 | ≥ {PRD_TARGETS['department_macro_f1']:.2f} | {fmt(f1)}{zero} |"
+    )
     for flag in ("safety_hazard", "wants_human"):
         s = main[flag]
-        lines.append(f"| `{flag}` recall | ≥ 0.90 | {fmt(s['recall'])} ({s['raised']} raised, {s['true']} true) |")
+        lines.append(
+            f"| `{flag}` recall | ≥ 0.90 | {fmt(s['recall'])} ({s['raised']} raised, {s['true']} true) |"
+        )
     lat = main["latency"]
-    lines.append(f"| Laya latency, safety step / whole decision (p95, this machine) | ≤ 0.6 s / ≤ 2.5 s | {fmt(lat['safety_step_p95_s'])} s / {fmt(lat['whole_decision_p95_s'])} s |")
-    lines.append("| End of caller speech → first agent audio | ≤ 1.5 s | not measured here: `backend/scripts/call_smoke.py` (#22) |")
+    timed = (
+        f"{fmt(lat['safety_step_p95_s'])} s / {fmt(lat['whole_decision_p95_s'])} s"
+        if str(results[best]["revision"]).startswith("laya:")
+        else "— (not a Laya decider)"
+    )
+    lines.append(
+        f"| Laya latency, safety step / whole decision (p95, this machine) | ≤ 0.6 s / ≤ 2.5 s | {timed} |"
+    )
+    lines.append(
+        "| End of caller speech → first agent audio | ≤ 1.5 s | not measured here: `backend/scripts/call_smoke.py` (#22) |"
+    )
     clean, noisy = results[best].get("prisma_16k"), results[best].get("prisma_8k_noise")
     if clean and noisy:
         drop = clean["department"]["macro_f1"] - noisy["department"]["macro_f1"]
-        lines.append(f"| Accuracy drop, 8 kHz + noise vs clean (department macro-F1) | reported | {fmt(drop)} ({fmt(clean['department']['macro_f1'])} → {fmt(noisy['department']['macro_f1'])}) |")
+        lines.append(
+            f"| Accuracy drop, 8 kHz + noise vs clean (department macro-F1) | reported | {fmt(drop)} ({fmt(clean['department']['macro_f1'])} → {fmt(noisy['department']['macro_f1'])}) |"
+        )
     else:
         lines.append("| Accuracy drop, 8 kHz + noise vs clean | reported | needs `transcribe.py` |")
     return lines
@@ -222,25 +252,53 @@ def detail(results: dict[str, Any]) -> list[str]:
         conds = [c for c in CONDITIONS if c in by_condition]
         lines.append("| | " + " | ".join(CONDITION_LABEL[c] for c in conds) + " |")
         lines.append("| --- |" + " --- |" * len(conds))
-        lines.append("| department macro-F1 | " + " | ".join(fmt(by_condition[c]["department"]["macro_f1"]) for c in conds) + " |")
+        lines.append(
+            "| department macro-F1 | "
+            + " | ".join(fmt(by_condition[c]["department"]["macro_f1"]) for c in conds)
+            + " |"
+        )
         for q in CHOICES:
-            lines.append(f"| {q} accuracy | " + " | ".join(fmt(by_condition[c][q]["accuracy"]) for c in conds) + " |")
+            lines.append(
+                f"| {q} accuracy | "
+                + " | ".join(fmt(by_condition[c][q]["accuracy"]) for c in conds)
+                + " |"
+            )
         for q in FLAGS:
             cells = []
             for c in conds:
                 s = by_condition[c][q]
-                cells.append(f"recall {fmt(s['recall'])}, precision {fmt(s['precision'])} ({s['raised']}/{s['true']})")
+                cells.append(
+                    f"recall {fmt(s['recall'])}, precision {fmt(s['precision'])} ({s['raised']}/{s['true']})"
+                )
             lines.append(f"| {q} | " + " | ".join(cells) + " |")
-        lines.append("| whole decision, median / p95 | " + " | ".join(
-            f"{fmt(by_condition[c]['latency']['whole_decision_median_s'])} / {fmt(by_condition[c]['latency']['whole_decision_p95_s'])} s" for c in conds) + " |")
+        lines.append(
+            "| whole decision, median / p95 | "
+            + " | ".join(
+                f"{fmt(by_condition[c]['latency']['whole_decision_median_s'])} / {fmt(by_condition[c]['latency']['whole_decision_p95_s'])} s"
+                for c in conds
+            )
+            + " |"
+        )
     return lines
 
 
 def report(results: dict[str, Any], set_name: str, note: str) -> str:
     when = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
-    lines = [f"# Evaluation: {set_name}", "", f"Generated by `eval/run.py` on {when}. {note}", "", "## Success metrics (docs/PRD.md)", ""]
+    lines = [
+        f"# Evaluation: {set_name}",
+        "",
+        f"Generated by `eval/run.py` on {when}. {note}",
+        "",
+        "## Success metrics (docs/PRD.md)",
+        "",
+    ]
     lines += headline(results, "prisma_16k")
-    lines += ["", "Flags show *raised / truly positive* in the detail tables, so false alarms are visible next to misses.", "", "## Detail"]
+    lines += [
+        "",
+        "Flags show *raised / truly positive* in the detail tables, so false alarms are visible next to misses.",
+        "",
+        "## Detail",
+    ]
     lines += detail(results)
     return "\n".join(lines) + "\n"
 
@@ -248,23 +306,36 @@ def report(results: dict[str, Any], set_name: str, note: str) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--set", choices=["test", "seed"], default="test")
-    parser.add_argument("--test-file", type=Path, help="the test set JSONL (default for --set test)")
+    parser.add_argument(
+        "--test-file", type=Path, help="the test set JSONL (default for --set test)"
+    )
     parser.add_argument("--transcripts", type=Path, help="transcribe.py's output")
     parser.add_argument("--no-keyword", action="store_true", help="skip the keyword stand-in")
-    parser.add_argument("--laya", action="append", default=[], metavar="NAME=SOURCE",
-                        help="a Laya checkpoint: NAME=dir or NAME=repo@revision; repeatable")
+    parser.add_argument(
+        "--laya",
+        action="append",
+        default=[],
+        metavar="NAME=SOURCE",
+        help="a Laya checkpoint: NAME=dir or NAME=repo@revision; repeatable",
+    )
     parser.add_argument("--name", help="report file name (default: the set and today's date)")
     args = parser.parse_args()
 
     if args.set == "seed":
-        rows, note = read_jsonl(SEED_FILE), (
-            "The seed set (data/seed) is hand-written but was shown to the data generator as "
-            "examples, so it is not held out: use it to compare deciders, not to claim accuracy."
+        rows, note = (
+            read_jsonl(SEED_FILE),
+            (
+                "The seed set (data/seed) is hand-written but was shown to the data generator as "
+                "examples, so it is not held out: use it to compare deciders, not to claim accuracy."
+            ),
         )
     else:
         if not args.test_file:
             parser.error("--set test needs --test-file (built by build_test_set.py)")
-        rows, note = read_jsonl(args.test_file), "The held-out test set (#13): never seen by the generator or the training run."
+        rows, note = (
+            read_jsonl(args.test_file),
+            "The held-out test set (#13): never seen by the generator or the training run.",
+        )
     bad = {r["id"]: e for r in rows if (e := label_errors(r["labels"]))}
     if bad:
         raise SystemExit(f"Labels that do not fit the schema: {bad}")
@@ -284,7 +355,9 @@ def main() -> None:
     REPORTS.mkdir(parents=True, exist_ok=True)
     text = report(results, "seed set" if args.set == "seed" else "held-out test set", note)
     (REPORTS / f"{name}.md").write_text(text, "utf-8")
-    (REPORTS / f"{name}.json").write_text(json.dumps(results, indent=1, ensure_ascii=False), "utf-8")
+    (REPORTS / f"{name}.json").write_text(
+        json.dumps(results, indent=1, ensure_ascii=False), "utf-8"
+    )
     print("\n" + "\n".join(text.splitlines()[:16]))
     print(f"\nWrote {REPORTS / name}.md")
 

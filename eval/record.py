@@ -14,8 +14,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from audio import write_wav
 from common import OUT, read_jsonl
+from line_audio import write_wav
 
 RATE = 16000
 AUDIO = OUT / "audio"
@@ -68,7 +68,9 @@ def record_one(row_id: str) -> str:
             return "skipped"
         samples = capture()
         seconds = len(samples) / RATE
-        answer = input(f"  {seconds:.1f} s. Enter keeps it; r again, p play, s skip ").strip().lower()
+        answer = (
+            input(f"  {seconds:.1f} s. Enter keeps it; r again, p play, s skip ").strip().lower()
+        )
         while answer == "p":
             play(samples)
             answer = input("  Enter keeps it; r again, s skip ").strip().lower()

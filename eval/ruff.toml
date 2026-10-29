@@ -1,0 +1,5 @@
+# The backend's rules (eval imports the backend), but the report's Markdown table rows may be long.
+extend = "../backend/pyproject.toml"
+
+[lint.per-file-ignores]
+"run.py" = ["E501"]

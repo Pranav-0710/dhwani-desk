@@ -45,8 +45,10 @@ def _low_pass(cutoff: float) -> list[float]:
     for n in range(_TAPS):
         x = n - middle
         sinc = 2 * cutoff if x == 0 else math.sin(2 * math.pi * cutoff * x) / (math.pi * x)
-        window = 0.42 - 0.5 * math.cos(2 * math.pi * n / (_TAPS - 1)) + 0.08 * math.cos(
-            4 * math.pi * n / (_TAPS - 1)
+        window = (
+            0.42
+            - 0.5 * math.cos(2 * math.pi * n / (_TAPS - 1))
+            + 0.08 * math.cos(4 * math.pi * n / (_TAPS - 1))
         )
         taps.append(sinc * window)
     total = sum(taps)

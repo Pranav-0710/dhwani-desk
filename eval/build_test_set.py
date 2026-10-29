@@ -23,7 +23,16 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from common import DATASET_REPO, MANIFEST, OUT, SCHEMA, TEST_FILE, fingerprint, label_errors, write_jsonl
+from common import (
+    DATASET_REPO,
+    MANIFEST,
+    OUT,
+    SCHEMA,
+    TEST_FILE,
+    fingerprint,
+    label_errors,
+    write_jsonl,
+)
 
 # The sheet's column names for the labels, and the schema's.
 SHEET_NAMES = {
@@ -64,7 +73,9 @@ def parse_fixes(text: str) -> dict[str, Any] | None:
     return fixes
 
 
-def corrected(draft: list[dict[str, Any]], sheet: list[dict[str, str]]) -> tuple[list[dict], list[str]]:
+def corrected(
+    draft: list[dict[str, Any]], sheet: list[dict[str, str]]
+) -> tuple[list[dict], list[str]]:
     """The draft with the sheet's corrections; also what was dropped or changed, for the log."""
     by_id = {row["id"]: row for row in draft}
     rows, log = [], []
@@ -91,23 +102,26 @@ def read_sheet(path: Path) -> list[dict[str, str]]:
 
     sheet = load_workbook(path, read_only=True)["Test set"]
     header = [str(c or "").strip() for c in next(sheet.iter_rows(max_row=1, values_only=True))]
-    column = {name: header.index(name) for name in ("id", "Your Kannada (if changed)", "Fix labels")}
+    column = {
+        name: header.index(name) for name in ("id", "Your Kannada (if changed)", "Fix labels")
+    }
     lines = []
     for values in sheet.iter_rows(min_row=2, values_only=True):
         if not values[column["id"]]:
             continue
-        lines.append({
-            "id": str(values[column["id"]]),
-            "kannada": str(values[column["Your Kannada (if changed)"]] or ""),
-            "fix": str(values[column["Fix labels"]] or ""),
-        })
+        lines.append(
+            {
+                "id": str(values[column["id"]]),
+                "kannada": str(values[column["Your Kannada (if changed)"]] or ""),
+                "fix": str(values[column["Fix labels"]] or ""),
+            }
+        )
     return lines
 
 
 def manifest(rows: list[dict[str, Any]]) -> dict[str, Any]:
     counts = {
-        name: dict(sorted(Counter(str(r["labels"][name]) for r in rows).items()))
-        for name in SCHEMA
+        name: dict(sorted(Counter(str(r["labels"][name]) for r in rows).items())) for name in SCHEMA
     }
     return {
         "set": "held-out test set (#13)",
@@ -123,8 +137,11 @@ def push(path: Path) -> str:
 
     api = HfApi(token=os.environ.get("HF_TOKEN") or None)
     commit = api.upload_file(
-        path_or_fileobj=str(path), path_in_repo=TEST_FILE, repo_id=DATASET_REPO,
-        repo_type="dataset", commit_message="Held-out test set (#13)",
+        path_or_fileobj=str(path),
+        path_in_repo=TEST_FILE,
+        repo_id=DATASET_REPO,
+        repo_type="dataset",
+        commit_message="Held-out test set (#13)",
     )
     return commit.oid
 
