@@ -46,7 +46,7 @@ async def synthesise(lines: list[str], rate: int) -> list[bytes]:
         return [await tts.synthesize(line) for line in lines]
 
 
-async def call(url: str, lines: list[str]) -> None:
+async def call(url: str, origin: str, lines: list[str]) -> None:
     settings = get_settings()
     rate = settings.gnani_stt_sample_rate
     speech = await synthesise(lines, rate)
@@ -59,7 +59,7 @@ async def call(url: str, lines: list[str]) -> None:
     caller_done_at: float | None = None
     talk: asyncio.Queue[bytes] = asyncio.Queue()
 
-    async with websockets.connect(url, max_size=None) as socket:
+    async with websockets.connect(url, origin=origin, max_size=None) as socket:
 
         async def microphone() -> None:
             chunk = rate * 2 // 10  # 100 ms of 16-bit mono
@@ -143,10 +143,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("lines", nargs="*", help="caller lines in Kannada, one per turn")
     parser.add_argument("--url", default="ws://127.0.0.1:8000/ws/call")
+    # The backend only lets pages on ALLOWED_ORIGINS in; call as the first of them.
+    first_origin = get_settings().allowed_origins.split(",")[0]
+    parser.add_argument("--origin", default=first_origin, help="Origin header to send")
     args = parser.parse_args()
     if not get_settings().gnani_api_key.get_secret_value():
         sys.exit("GNANI_API_KEY is not set in .env")
-    asyncio.run(call(args.url, args.lines or DEFAULT_LINES))
+    if not args.origin:
+        sys.exit("ALLOWED_ORIGINS is empty, so the backend refuses every call; pass --origin")
+    asyncio.run(call(args.url, args.origin, args.lines or DEFAULT_LINES))
 
 
 if __name__ == "__main__":
