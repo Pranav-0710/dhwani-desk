@@ -11,7 +11,7 @@ Lakshmi Narasimman was away until 2026-10-16. In that time Jey Pranav also did t
 | Laya (benchmark, fine-tuning, serving) | Week-1 Kannada benchmark and go/no-go decision; ONNX serving in the call, safety-first decisions, latency report | |
 | Data and evaluation | Decision schema, fictional wards, seed set; synthetic data generator with consistency and meaning checks | |
 | Console and phone UI | Phone page: browser mic capture and agent playback | |
-| Delivery (Docker, demo, posts, write-up) | Repo bootstrap, CI, PRD; Hugging Face organization and repos; call sockets locked down for the tunnel | |
+| Delivery (Docker, demo, posts, write-up) | Repo bootstrap, CI, PRD; Hugging Face organization and repos; call sockets locked down for the tunnel; Docker Compose and tunnel runbook | |
 
 ## Log
 
@@ -32,3 +32,4 @@ Lakshmi Narasimman was away until 2026-10-16. In that time Jey Pranav also did t
 | 2026-10-23 | Jey Pranav | #42 | Laya serving: ONNX decider, safety questions first, "one moment" line, latency report (#15) |
 | 2026-10-23 | Jey Pranav | #43 | Officer take-over: console socket, typed replies spoken by Timbre, hand-back, thresholds API (#16) |
 | 2026-10-24 | Jey Pranav | #45 | Call sockets locked down: allowed pages only, two calls at a time, silent sockets hung up (#29) |
+| 2026-10-29 | Jey Pranav | #48 | Docker Compose, nginx in front, tunnel runbook; console API needs the token (#21) |
