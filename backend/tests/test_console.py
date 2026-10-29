@@ -79,8 +79,10 @@ def test_a_console_sees_the_live_calls_and_thresholds_and_gets_answers(
             "call_id": "nobody",
         },
     ]
+    officer = {"Authorization": f"Bearer {TOKEN}"}
     with TestClient(app_module.app) as client:
-        assert client.get("/api/thresholds").json()["safety_hazard"] == thresholds.SAFETY_HAZARD
+        listed = client.get("/api/thresholds", headers=officer).json()
+    assert listed["safety_hazard"] == thresholds.SAFETY_HAZARD
 
 
 class ScriptedConsole:

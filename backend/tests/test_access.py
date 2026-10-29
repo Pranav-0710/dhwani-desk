@@ -47,10 +47,13 @@ def test_the_phone_page_on_the_dev_server_may_connect(
 
 def test_an_added_origin_such_as_the_tunnel_may_connect(monkeypatch: pytest.MonkeyPatch) -> None:
     use_settings(monkeypatch, allowed_origins=f"{PHONE_ORIGIN}, {TUNNEL}/")
-    client = TestClient(app_module.app, headers={"origin": TUNNEL})
+    # A scripted browser, not TestClient: leaving TestClient mid-relay can fail its teardown.
+    browser = ScriptedBrowser([], leave_when=connected, origin=TUNNEL)
 
-    with client.websocket_connect("/ws/stt") as ws:
-        assert ws.receive_json()["type"] == "config"
+    asyncio.run(app_module.stt_proxy(browser))
+
+    assert browser.accepted
+    assert browser.sent[0]["type"] == "config"
 
 
 @pytest.mark.parametrize("origin", ["https://evil.example", "http://localhost:5174", None])

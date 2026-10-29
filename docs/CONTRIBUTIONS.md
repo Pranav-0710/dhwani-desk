@@ -13,7 +13,7 @@ From 2026-10-28 Lakshmi Narasimman is away again, and Jey Pranav is doing the re
 | Laya (benchmark, fine-tuning, serving) | Week-1 Kannada benchmark and go/no-go decision; ONNX serving in the call, safety-first decisions, latency report; fine-tuning run and checkpoint publishing | |
 | Data and evaluation | Decision schema, fictional wards, seed set; synthetic data generator with consistency and meaning checks | |
 | Console and phone UI | Phone page: browser mic capture and agent playback; line noise toggle; supervisor console | |
-| Delivery (Docker, demo, posts, write-up) | Repo bootstrap, CI, PRD; Hugging Face organization and repos; call sockets locked down for the tunnel | |
+| Delivery (Docker, demo, posts, write-up) | Repo bootstrap, CI, PRD; Hugging Face organization and repos; call sockets locked down for the tunnel; Docker Compose and tunnel runbook | |
 
 ## Log
 
@@ -37,3 +37,4 @@ From 2026-10-28 Lakshmi Narasimman is away again, and Jey Pranav is doing the re
 | 2026-10-24 | Jey Pranav | #44 | Line noise toggle on the phone page: pink noise at two levels, kept on while the caller is muted (#11) |
 | 2026-10-28 | Jey Pranav | #46 | Laya fine-tuning notebook: Kaggle run, ONNX export, load check, tagged checkpoint (#14) |
 | 2026-10-29 | Jey Pranav | #47 | Supervisor console: live calls, decision bars, take-over, tickets table (#18) |
+| 2026-10-29 | Jey Pranav | #48 | Docker Compose, nginx in front, tunnel runbook; console API needs the token (#21) |

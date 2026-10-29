@@ -13,6 +13,8 @@ uv sync
 
 ## Run
 
+In Docker, with the console in front: `docker compose up --build` from the repo root (`docs/runbook.md`). For development:
+
 ```bash
 uv run uvicorn app:app --reload
 ```
@@ -164,8 +166,7 @@ Two rules protect callers:
 - **Masking:** caller turns are stored masked in `transcripts`. Before anything is written, every run of 10 or more digits (phone, Aadhaar, account) is replaced with X. When the decider thinks a personal ID was said, runs of 4 or more digits are masked too.
 - **Retention:** turns older than `TRANSCRIPT_RETENTION_DAYS` (default 7) are deleted at startup and every hour after. Tickets are kept.
 
-Read-only API for the console:
+Read-only API for the console. Each request needs the console's token, `Authorization: Bearer <CONSOLE_TOKEN>` (401 without it, 503 while `CONSOLE_TOKEN` is unset), as does `GET /api/thresholds`:
 - `GET /api/tickets?limit=50`: newest first, `limit` from 1 to 500.
 - `GET /api/tickets/{number}`: returns 404 when no such ticket exists.
 
-The console's Vite dev server proxies only `/ws` today, so `/api` needs adding there.
