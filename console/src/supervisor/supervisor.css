@@ -318,6 +318,11 @@ button.sv-alert {
   min-width: 0;
 }
 
+button.sv-inline {
+  padding: 4px 12px;
+  font-size: 0.9rem;
+}
+
 button.sv-secondary {
   background: transparent;
   color: var(--text);

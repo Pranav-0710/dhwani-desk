@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { EMPTY, applyMessage, needsOfficer, type DialogueEvent, type ServerMessage } from './protocol'
+import {
+  EMPTY,
+  applyMessage,
+  callToShow,
+  needsOfficer,
+  waitingCalls,
+  type DialogueEvent,
+  type LocalAction,
+  type ServerMessage,
+} from './protocol'
 
 const thresholds = {
   safety_hazard: 0.6,
@@ -45,7 +54,7 @@ const decision = {
   contains_personal_id: 0.01,
 }
 
-function run(...messages: ServerMessage[]) {
+function run(...messages: (ServerMessage | LocalAction)[]) {
   return messages.reduce(applyMessage, EMPTY)
 }
 
@@ -90,14 +99,50 @@ describe('applyMessage', () => {
     ])
   })
 
-  it("marks what the agent's voice says for an officer as the officer's", () => {
+  it("labels a line the officer's when the agent's voice says what they sent", () => {
     const state = run(
       started,
       dialogue({ state: 'handed_off', reason: 'taken_over', officer: true }),
+      { type: 'officer_said', call_id: 'c1', text: '  ನಾನು   ಅಧಿಕಾರಿ ' },
       { type: 'call_event', call_id: 'c1', event: { type: 'agent_text', text: 'ನಾನು ಅಧಿಕಾರಿ' } },
     )
 
     expect(state.calls.c1.lines.at(-1)).toEqual({ who: 'officer', text: 'ನಾನು ಅಧಿಕಾರಿ' })
+    expect(state.calls.c1.officerQueue).toEqual([])
+  })
+
+  it("keeps the agent's own queued lines the agent's after a take-over", () => {
+    // The hand-off line is spoken after the officer has already taken the call.
+    const state = run(
+      started,
+      dialogue({ state: 'handed_off', reason: 'safety', officer: true }),
+      { type: 'call_event', call_id: 'c1', event: { type: 'agent_text', text: 'ದಯವಿಟ್ಟು ದೂರ ಇರಿ' } },
+    )
+
+    expect(state.calls.c1.lines.at(-1)?.who).toBe('agent')
+  })
+
+  it("keeps the officer's queued lines theirs after a hand-back", () => {
+    const state = run(
+      started,
+      dialogue({ state: 'handed_off', officer: true }),
+      { type: 'officer_said', call_id: 'c1', text: 'ಬರ್ತಿದ್ದೀವಿ' },
+      dialogue({ state: 'listening', officer: false, keys: ['hand_back'] }),
+      { type: 'call_event', call_id: 'c1', event: { type: 'agent_text', text: 'ಬರ್ತಿದ್ದೀವಿ' } },
+    )
+
+    expect(state.calls.c1.lines.at(-1)?.who).toBe('officer')
+  })
+
+  it('forgets a line the backend refused to say', () => {
+    const state = run(
+      started,
+      { type: 'officer_said', call_id: 'c1', text: 'ಸರಿ' },
+      { type: 'officer_unsaid', call_id: 'c1', text: 'ಸರಿ' },
+      { type: 'call_event', call_id: 'c1', event: { type: 'agent_text', text: 'ಸರಿ' } },
+    )
+
+    expect(state.calls.c1.lines.at(-1)?.who).toBe('agent')
   })
 
   it('shows the safety step until the full decision replaces it', () => {
@@ -135,5 +180,42 @@ describe('applyMessage', () => {
     const state = run({ type: 'call_event', call_id: 'ghost', event: { type: 'transcript', text: 'x' } })
 
     expect(state).toEqual(EMPTY)
+  })
+
+  it('marks calls the console joined part-way through', () => {
+    const joined = run({ type: 'calls', thresholds, calls: [{ call_id: 'c0', started_at: 'x', state: 'listening', reason: null, officer: false, slots }] })
+    const fresh = run(started)
+
+    expect(joined.calls.c0.joinedMidCall).toBe(true)
+    expect(fresh.calls.c1.joinedMidCall).toBe(false)
+  })
+})
+
+describe('callToShow', () => {
+  const at = (id: string, minute: number): ServerMessage => ({
+    ...(started as Extract<ServerMessage, { type: 'call_started' }>),
+    call_id: id,
+    started_at: `2026-10-29T10:0${minute}:00Z`,
+  })
+  const handOff = (id: string): ServerMessage => ({
+    type: 'call_event',
+    call_id: id,
+    event: { ...(dialogue({ state: 'handed_off', reason: 'safety' }) as { event: DialogueEvent }).event },
+  })
+
+  it('opens on the longest-waiting call, then the newest', () => {
+    const state = run(at('a', 1), at('b', 2), at('c', 3), handOff('a'), handOff('b'))
+
+    expect(waitingCalls(state).map((c) => c.id)).toEqual(['a', 'b'])
+    expect(callToShow(state, null)).toBe('a')
+    expect(callToShow(run(at('a', 1), at('b', 2)), null)).toBe('b')
+  })
+
+  it("stays on the officer's call when it is taken over or a new call starts", () => {
+    const state = run(at('a', 1), handOff('a'))
+    const pinned = callToShow(state, null)
+    const later = run(at('a', 1), handOff('a'), at('b', 2), at('c', 3))
+
+    expect(callToShow(later, pinned)).toBe('a')
   })
 })

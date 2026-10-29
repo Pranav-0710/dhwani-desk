@@ -67,11 +67,11 @@ describe('ConsoleClient', () => {
       { type: 'say', call_id: 'c1', id: 2, text: 'ನಮಸ್ಕಾರ' },
     ])
 
-    socket.receive({ type: 'error', message: 'The officer has not taken this call', command: 'say', call_id: 'c1', id: 2 })
+    socket.receive({ type: 'error', message: 'Take the call over before speaking on it', command: 'say', call_id: 'c1', id: 2 })
     socket.receive({ type: 'done', command: 'take_over', call_id: 'c1', id: 1 })
 
     await expect(takeOver).resolves.toBeUndefined()
-    await expect(say).rejects.toThrow('The officer has not taken this call')
+    await expect(say).rejects.toThrow('Take the call over before speaking on it')
   })
 
   it('gives up on a command the server never answers', async () => {
@@ -93,5 +93,25 @@ describe('ConsoleClient', () => {
 
     await expect(command).rejects.toThrow('lost its connection')
     await expect(client.send('take_over', 'c1')).rejects.toThrow('not connected')
+  })
+
+  it("drops a closed connection's handlers, so it cannot reach the next one", () => {
+    const { socket, client, statuses, messages } = connect()
+    client.close()
+
+    socket.receive({ type: 'calls', calls: [], thresholds: {} })
+    socket.onclose?.({ code: 1006 })
+
+    expect(statuses.map(([s]) => s)).toEqual(['connecting'])
+    expect(messages).toEqual([])
+  })
+
+  it('passes on why the server ended the session', () => {
+    const { socket, statuses } = connect()
+
+    socket.receive({ type: 'error', message: 'Fell too far behind; reconnect' })
+    socket.onclose?.({ code: 1000 })
+
+    expect(statuses.at(-1)).toEqual(['closed', 'Fell too far behind; reconnect'])
   })
 })

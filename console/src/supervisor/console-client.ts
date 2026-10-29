@@ -48,29 +48,36 @@ export class ConsoleClient {
   connect(token: string, url = consoleUrl()): void {
     this.onStatus('connecting')
     const socket = this.openSocket(url)
-    let refused: string | null = null
+    // The server's reason for ending the session: a refused hello, "fell too far behind", etc.
+    let reason: string | null = null
     socket.onopen = () => socket.send(JSON.stringify({ type: 'hello', token }))
     socket.onmessage = (raw) => {
       if (typeof raw.data !== 'string') return
       const message = JSON.parse(raw.data) as ServerMessage
       if (message.type === 'calls') this.onStatus('connected')
       if (message.type === 'error' && message.id === undefined && message.command === undefined) {
-        // Not a command's answer: the hello was refused, or the console fell behind.
-        refused = message.message
+        reason = message.message
       }
       if (message.type === 'done' || message.type === 'error') this.settle(message)
       this.onMessage(message)
     }
     socket.onclose = (event) => {
       this.failPending('The console lost its connection')
-      this.onStatus(event.code === 1008 ? 'refused' : 'closed', refused ?? undefined)
+      this.onStatus(event.code === 1008 ? 'refused' : 'closed', reason ?? undefined)
     }
     this.socket = socket
   }
 
+  /** Close for good: the socket's handlers are dropped first, so a late close or message from
+   * it cannot reach a newer connection's page. */
   close(): void {
-    this.socket?.close(1000)
+    const socket = this.socket
     this.socket = null
+    if (!socket) return
+    socket.onopen = socket.onmessage = null
+    socket.onclose = null
+    this.failPending('The console was closed')
+    socket.close(1000)
   }
 
   /** Resolves once the call has carried the command out; rejects with the server's reason. */

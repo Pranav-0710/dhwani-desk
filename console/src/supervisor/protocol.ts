@@ -92,6 +92,12 @@ export type ServerMessage =
   | { type: 'done'; command: string; call_id: string; id?: string | number }
   | { type: 'error'; message: string; command?: string; call_id?: string; id?: string | number }
 
+/** Actions from the page itself: the officer sent a line (or it failed), so the next time the
+ * agent's voice says those words they are the officer's. */
+export type LocalAction =
+  | { type: 'officer_said'; call_id: string; text: string }
+  | { type: 'officer_unsaid'; call_id: string; text: string }
+
 export type Speaker = 'caller' | 'agent' | 'officer'
 
 export interface Line {
@@ -113,6 +119,11 @@ export interface LiveCall {
   ticket: Ticket | null
   /** The call's socket has closed; kept on screen so its last state can be read. */
   ended: boolean
+  /** Lines the officer sent that the agent's voice has not said yet, oldest first. Lines are
+   * spoken some time after they are queued, so `officer` at that moment cannot tell. */
+  officerQueue: string[]
+  /** The console joined after the call started: decisions before then were not seen. */
+  joinedMidCall: boolean
 }
 
 export interface ConsoleState {
@@ -124,7 +135,12 @@ export interface ConsoleState {
 
 export const EMPTY: ConsoleState = { calls: {}, order: [], thresholds: null }
 
-function fromSummary(summary: CallSummary): LiveCall {
+/** An officer's line as the backend speaks it (Dialogue.officer_says). */
+export function spokenForm(text: string): string {
+  return text.split(/\s+/).filter(Boolean).join(' ')
+}
+
+function fromSummary(summary: CallSummary, joinedMidCall: boolean): LiveCall {
   return {
     id: summary.call_id,
     startedAt: summary.started_at,
@@ -137,6 +153,8 @@ function fromSummary(summary: CallSummary): LiveCall {
     screening: null,
     ticket: null,
     ended: false,
+    officerQueue: [],
+    joinedMidCall,
   }
 }
 
@@ -152,9 +170,14 @@ function applyEvent(call: LiveCall, event: CallEvent): LiveCall {
         ? { ...call, lines: [...call.lines, { who: 'caller', text: event.text }] }
         : call
     case 'agent_text': {
-      // While an officer has the call, the agent's voice only ever says what they typed.
-      const who: Speaker = call.officer ? 'officer' : 'agent'
-      return { ...call, lines: [...call.lines, { who, text: event.text }] }
+      const [next, ...rest] = call.officerQueue
+      const officers = next !== undefined && spokenForm(event.text) === next
+      const who: Speaker = officers ? 'officer' : 'agent'
+      return {
+        ...call,
+        lines: [...call.lines, { who, text: event.text }],
+        officerQueue: officers ? rest : call.officerQueue,
+      }
     }
     case 'dialogue':
       return {
@@ -174,17 +197,27 @@ function applyEvent(call: LiveCall, event: CallEvent): LiveCall {
   }
 }
 
-export function applyMessage(state: ConsoleState, message: ServerMessage): ConsoleState {
+export function applyMessage(state: ConsoleState, message: ServerMessage | LocalAction): ConsoleState {
   switch (message.type) {
+    case 'officer_said':
+    case 'officer_unsaid': {
+      const call = state.calls[message.call_id]
+      if (!call) return state
+      const line = spokenForm(message.text)
+      const queue = [...call.officerQueue]
+      if (message.type === 'officer_said') queue.push(line)
+      else if (queue.includes(line)) queue.splice(queue.indexOf(line), 1)
+      return withCall(state, { ...call, officerQueue: queue })
+    }
     case 'calls': {
-      const calls = Object.fromEntries(message.calls.map((c) => [c.call_id, fromSummary(c)]))
+      const calls = Object.fromEntries(message.calls.map((c) => [c.call_id, fromSummary(c, true)]))
       const order = [...message.calls]
         .sort((a, b) => b.started_at.localeCompare(a.started_at))
         .map((c) => c.call_id)
       return { calls, order, thresholds: message.thresholds }
     }
     case 'call_started':
-      return withCall(state, fromSummary(message))
+      return withCall(state, fromSummary(message, false))
     case 'call_event': {
       const call = state.calls[message.call_id]
       return call ? withCall(state, applyEvent(call, message.event)) : state
@@ -201,6 +234,21 @@ export function applyMessage(state: ConsoleState, message: ServerMessage): Conso
 /** The call is waiting for an officer: handed off, and nobody has taken it yet. */
 export function needsOfficer(call: LiveCall): boolean {
   return !call.ended && call.state === 'handed_off' && !call.officer
+}
+
+/** Calls waiting for an officer, the longest-waiting first. */
+export function waitingCalls(state: ConsoleState): LiveCall[] {
+  return state.order
+    .map((id) => state.calls[id])
+    .filter(needsOfficer)
+    .reverse()
+}
+
+/** Which call the page shows: the officer's choice, else the longest-waiting, else the newest.
+ * The page pins whatever this returns, so it never moves on by itself. */
+export function callToShow(state: ConsoleState, chosen: string | null): string | null {
+  if (chosen && state.calls[chosen]) return chosen
+  return waitingCalls(state)[0]?.id ?? state.order[0] ?? null
 }
 
 /** Why a call was handed off or closed, for an officer. */

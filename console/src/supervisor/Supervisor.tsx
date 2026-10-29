@@ -5,8 +5,11 @@ import {
   EMPTY,
   REASON_LABEL,
   applyMessage,
+  callToShow,
   needsOfficer,
+  waitingCalls,
   type ConsoleState,
+  type LocalAction,
   type Decision,
   type LiveCall,
   type Screening,
@@ -36,9 +39,10 @@ function readToken(): string {
   }
 }
 
-function saveToken(token: string): void {
+function saveToken(token: string | null): void {
   try {
-    sessionStorage.setItem(TOKEN_KEY, token)
+    if (token) sessionStorage.setItem(TOKEN_KEY, token)
+    else sessionStorage.removeItem(TOKEN_KEY)
   } catch {
     // Private windows can refuse storage; the officer just types the token again.
   }
@@ -46,12 +50,15 @@ function saveToken(token: string): void {
 
 export default function Supervisor() {
   const [token, setToken] = useState(readToken)
+  // Bumped to connect again with the same token: a Reconnect, or the same token re-entered.
+  const [attempt, setAttempt] = useState(0)
   const [state, dispatch] = useReducer(
-    (current: ConsoleState, message: ServerMessage) => applyMessage(current, message),
+    (current: ConsoleState, message: ServerMessage | LocalAction) => applyMessage(current, message),
     EMPTY,
   )
   const [status, setStatus] = useState<ConsoleStatus>('closed')
   const [problem, setProblem] = useState<string | null>(null)
+  const [ticketsError, setTicketsError] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [tickets, setTickets] = useState<StoredTicket[]>([])
   const client = useRef<ConsoleClient | null>(null)
@@ -59,21 +66,35 @@ export default function Supervisor() {
   const refreshTickets = useCallback(() => {
     if (!token) return
     fetchTickets(token)
-      .then(setTickets)
-      .catch((error: Error) => setProblem(error.message))
+      .then((list) => {
+        setTickets(list)
+        setTicketsError(null)
+      })
+      .catch((error: Error) => setTicketsError(error.message))
   }, [token])
+  // The socket's handlers read this, so a new refreshTickets never reconnects the socket.
+  const refresh = useRef(refreshTickets)
+  useEffect(() => {
+    refresh.current = refreshTickets
+  }, [refreshTickets])
 
   useEffect(() => {
     if (!token) return
     const connection = new ConsoleClient(
       (message) => {
         dispatch(message)
-        if (message.type === 'call_closed') refreshTickets()
+        if (message.type === 'call_closed') refresh.current()
       },
       (next, detail) => {
         setStatus(next)
-        if (next === 'refused') setProblem(detail ?? 'The console token was refused')
-        if (next === 'connected') setProblem(null)
+        if (next === 'refused') {
+          setProblem(detail ?? 'The console token was refused')
+          saveToken(null)
+        } else if (next === 'closed') {
+          setProblem(detail ? `Disconnected: ${detail}` : 'Disconnected from the backend')
+        } else if (next === 'connected') {
+          setProblem(null)
+        }
       },
     )
     connection.connect(token)
@@ -82,7 +103,7 @@ export default function Supervisor() {
       connection.close()
       client.current = null
     }
-  }, [token, refreshTickets])
+  }, [token, attempt])
 
   useEffect(() => {
     if (status !== 'connected') return
@@ -91,10 +112,13 @@ export default function Supervisor() {
     return () => clearInterval(timer)
   }, [status, refreshTickets])
 
-  // Follow the call that most needs an officer, unless one is already chosen.
+  // The page shows one call and stays on it: chosen by the officer, or else picked once (the
+  // longest-waiting, or the newest) and pinned, so a take-over or a new call never moves it.
+  const shown = callToShow(state, selected)
+  if (shown && shown !== selected) setSelected(shown)
   const calls = state.order.map((id) => state.calls[id])
-  const waiting = calls.filter(needsOfficer)
-  const current = (selected && state.calls[selected]) || waiting[0] || calls[0] || null
+  const waiting = waitingCalls(state)
+  const current = shown ? state.calls[shown] : null
 
   if (!token || status === 'refused') {
     return (
@@ -104,9 +128,23 @@ export default function Supervisor() {
           saveToken(value)
           setStatus('connecting')
           setToken(value)
+          setAttempt((n) => n + 1)
         }}
       />
     )
+  }
+
+  const sendFor = (callId: string) => async (command: Command, text?: string) => {
+    const connection = client.current
+    if (!connection) throw new Error('The console is not connected')
+    if (command !== 'say' || !text) return connection.send(command, callId, text)
+    dispatch({ type: 'officer_said', call_id: callId, text })
+    try {
+      await connection.send(command, callId, text)
+    } catch (failure) {
+      dispatch({ type: 'officer_unsaid', call_id: callId, text })
+      throw failure
+    }
   }
 
   return (
@@ -119,32 +157,36 @@ export default function Supervisor() {
         <span className={`sv-status sv-status-${status}`}>{STATUS_LABEL[status]}</span>
       </header>
 
-      {waiting.length > 0 && (
-        <button className="sv-alert" onClick={() => setSelected(waiting[0].id)}>
-          {waiting.length === 1 ? 'A call needs' : `${waiting.length} calls need`} an officer:{' '}
-          {REASON_LABEL[waiting[0].reason ?? ''] ?? waiting[0].reason}
-        </button>
+      <div role="alert" aria-live="assertive">
+        {waiting.length > 0 && (
+          <button className="sv-alert" onClick={() => setSelected(waiting[0].id)}>
+            {waiting.length === 1 ? 'A call needs' : `${waiting.length} calls need`} an officer:{' '}
+            {REASON_LABEL[waiting[0].reason ?? ''] ?? waiting[0].reason}
+            {waiting[0].id !== shown ? ' · show it' : ''}
+          </button>
+        )}
+      </div>
+      {problem && (
+        <p className="error">
+          {problem}{' '}
+          {status === 'closed' && (
+            <button className="sv-secondary sv-inline" onClick={() => setAttempt((n) => n + 1)}>
+              Reconnect
+            </button>
+          )}
+        </p>
       )}
-      {problem && <p className="error">{problem}</p>}
 
       <div className="sv-main">
-        <CallList calls={calls} current={current?.id ?? null} onSelect={setSelected} />
+        <CallList calls={calls} current={shown} onSelect={setSelected} />
         {current ? (
-          <CallView
-            key={current.id}
-            call={current}
-            thresholds={state.thresholds}
-            send={(command, text) =>
-              client.current?.send(command, current.id, text) ??
-              Promise.reject(new Error('The console is not connected'))
-            }
-          />
+          <CallView key={current.id} call={current} thresholds={state.thresholds} send={sendFor(current.id)} />
         ) : (
           <section className="sv-call sv-empty">No live calls. They appear here as they start.</section>
         )}
       </div>
 
-      <TicketTable tickets={tickets} />
+      <TicketTable tickets={tickets} error={ticketsError} />
     </div>
   )
 }
@@ -278,7 +320,7 @@ function CallView({
         ))}
       </ol>
 
-      <DecisionBars decision={call.decision} screening={call.screening} thresholds={thresholds} />
+      <DecisionBars decision={call.decision} screening={call.screening} thresholds={thresholds} joinedMidCall={call.joinedMidCall} />
 
       <div className="sv-controls">
         {!call.officer ? (
@@ -319,8 +361,14 @@ function CallView({
 }
 
 /** `risk`: past its threshold the call is handed off or redirected, so it is shown as an alarm.
- * The others past theirs only mean the agent has what it needs. */
-type Bar = { name: string; label: string; value: number; threshold?: number; risk?: boolean }
+ * The others past theirs only mean the agent has what it needs. `atLeast`: the backend counts
+ * the threshold itself as past it (department_confidence, machine.py); the rest need more. */
+type Bar = { name: string; label: string; value: number; threshold?: number; risk?: boolean; atLeast?: boolean }
+
+function pastThreshold(row: Bar): boolean {
+  if (row.threshold === undefined) return false
+  return row.atLeast ? row.value >= row.threshold : row.value > row.threshold
+}
 
 function bars(decision: Decision | null, screening: Screening | null, t: Thresholds | null): Bar[] {
   const source = decision ?? screening
@@ -332,7 +380,7 @@ function bars(decision: Decision | null, screening: Screening | null, t: Thresho
   ]
   if (decision) {
     rows.push(
-      { name: 'department_confidence', label: `Department: ${departmentLabel(decision.department)}`, value: decision.department_confidence, threshold: t?.department_confidence },
+      { name: 'department_confidence', label: `Department: ${departmentLabel(decision.department)}`, value: decision.department_confidence, threshold: t?.department_confidence, atLeast: true },
       { name: 'has_location', label: 'Gave a location', value: decision.has_location, threshold: t?.has_location },
       { name: 'repeat_complaint', label: 'Repeat complaint', value: decision.repeat_complaint, threshold: t?.repeat_complaint },
       { name: 'contains_personal_id', label: 'Said a personal number', value: decision.contains_personal_id },
@@ -345,14 +393,25 @@ function DecisionBars({
   decision,
   screening,
   thresholds,
+  joinedMidCall,
 }: {
   decision: Decision | null
   screening: Screening | null
   thresholds: Thresholds | null
+  joinedMidCall: boolean
 }) {
   const rows = useMemo(() => bars(decision, screening, thresholds), [decision, screening, thresholds])
-  if (rows.length === 0) return <p className="subtitle sv-bars-empty">No decision yet: waiting for the caller.</p>
+  if (rows.length === 0) {
+    return (
+      <p className="subtitle sv-bars-empty">
+        {joinedMidCall
+          ? 'The console joined during this call: its decision shows after the caller next speaks.'
+          : 'No decision yet: waiting for the caller.'}
+      </p>
+    )
+  }
   const urgency = (decision ?? screening)!.urgency
+  const handOffMood = decision && thresholds?.hand_off_caller_states.includes(decision.caller_state)
   return (
     <section className="sv-bars" aria-label="Laya's decision">
       <h3>
@@ -360,12 +419,15 @@ function DecisionBars({
       </h3>
       <p className="sv-chips">
         <span className={`sv-chip sv-urgency-${urgency}`}>Urgency: {urgency}</span>
-        {decision && <span className="sv-chip">Mood: {decision.caller_state}</span>}
+        {decision && (
+          <span className={`sv-chip${handOffMood ? ' sv-urgency-emergency' : ''}`}>Mood: {decision.caller_state}</span>
+        )}
         {decision && <span className="sv-chip">{wardLabel(decision.ward)}</span>}
       </p>
       <ul>
         {rows.map((row) => {
-          const over = row.threshold !== undefined && row.value > row.threshold
+          const over = pastThreshold(row)
+          const threshold = row.threshold === undefined ? '' : `, threshold ${row.threshold.toFixed(2)}`
           return (
             <li key={row.name} className={over ? (row.risk ? 'is-alarm' : 'is-met') : ''}>
               <span className="sv-bar-label">{row.label}</span>
@@ -375,6 +437,7 @@ function DecisionBars({
                 aria-valuemin={0}
                 aria-valuemax={1}
                 aria-valuenow={row.value}
+                aria-valuetext={`${row.value.toFixed(2)}${threshold}${over ? ', past it' : ''}`}
                 aria-label={row.label}
               >
                 <span className="sv-bar-fill" style={{ width: `${Math.round(row.value * 100)}%` }} />
@@ -391,7 +454,7 @@ function DecisionBars({
   )
 }
 
-function TicketTable({ tickets }: { tickets: StoredTicket[] }) {
+function TicketTable({ tickets, error }: { tickets: StoredTicket[]; error: string | null }) {
   const [filter, setFilter] = useState<TicketFilter>(NO_FILTER)
   const shown = filterTickets(tickets, filter)
   const select = (key: keyof TicketFilter, options: [string, string][]) => (
@@ -417,6 +480,7 @@ function TicketTable({ tickets }: { tickets: StoredTicket[] }) {
           {select('urgency', URGENCY_LEVELS.map((u): [string, string] => [u, u]))}
         </div>
       </div>
+      {error && <p className="error">Tickets could not be loaded: {error}</p>}
       <div className="sv-table-wrap">
         <table>
           <thead>
