@@ -4,13 +4,15 @@ The challenge asks each team member's contribution to be documented, and teammat
 
 Lakshmi Narasimman was away until 2026-10-16. In that time Jey Pranav also did the B-owned issues #5–#8 (seed set, Laya benchmark, data generator, Hugging Face repos), so they are logged under Jey Pranav's name below.
 
+From 2026-10-28 Lakshmi Narasimman is away again, and Jey Pranav is doing the remaining B-owned issues (#13, #14, #18, #19, #20, #23, #24); they are logged under Jey Pranav's name too.
+
 | Area | Jey Pranav | Lakshmi Narasimman |
 | --- | --- | --- |
 | Gnani integration | Prisma realtime STT client and proxy; Timbre TTS client and voice choice; browser call path | |
 | Dialogue and escalation | Dialogue state machine, Kannada reply templates, escalation order | |
 | Laya (benchmark, fine-tuning, serving) | Week-1 Kannada benchmark and go/no-go decision | |
 | Data and evaluation | Decision schema, fictional wards, seed set; synthetic data generator with consistency and meaning checks | |
-| Console and phone UI | Phone page: browser mic capture and agent playback | |
+| Console and phone UI | Phone page: browser mic capture and agent playback; supervisor console | |
 | Delivery (Docker, demo, posts, write-up) | Repo bootstrap, CI, PRD; Hugging Face organization and repos | |
 
 ## Log
@@ -28,3 +30,4 @@ Lakshmi Narasimman was away until 2026-10-16. In that time Jey Pranav also did t
 | 2026-10-13 | Jey Pranav | #36 | Hugging Face organization, private repos and token setup (#8) |
 | 2026-10-16 | Jey Pranav | #37 | Dialogue state machine with Kannada templates, escalation and hang-up (#9) |
 | 2026-10-16 | Jey Pranav | #39 | Two-person workflow: CODEOWNERS, required review, contributions backfill (#38) |
+| 2026-10-29 | Jey Pranav | #47 | Supervisor console: live calls, decision bars, take-over, tickets table (#18) |
