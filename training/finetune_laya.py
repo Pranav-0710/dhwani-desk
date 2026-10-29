@@ -51,6 +51,10 @@ PUBLISHED = ("tokenizer", "encoder", "questions.json", "train_report.json", "tra
 MIN_DEPARTMENT_ACCURACY = 0.5
 MIN_DEPARTMENTS_PREDICTED = 3
 SEED_FILE = REPO / "data" / "seed" / "seed.jsonl"
+# The exported graph must give the probabilities PyTorch gives, to this much, on these many
+# seed sentences.
+PARITY_ROWS = 8
+PARITY_TOLERANCE = 2e-3
 
 
 def laya_questions(names: tuple[str, ...] = LAYA_ANSWERS) -> dict[str, dict[str, Any]]:
@@ -299,13 +303,43 @@ def export_onnx(checkpoint: Path, work: Path) -> Path:
     checkout = ["git", "-C", str(source), "checkout", "-q", EXPORTER_COMMIT]
     subprocess.run(checkout, check=True, env=git)
     out = work / "export"
-    out.mkdir(parents=True, exist_ok=True)
-    # The exporter compares its graph with PyTorch weights it finds beside its output, and
-    # failing that with whatever Laya checkpoint is in the Hugging Face cache: the base, not ours.
-    link_or_copy(checkpoint / "model.safetensors", out / "model.safetensors")
+    # No --verify: its fixed tolerance on the raw `act_logits` (1e-2) fails a fine-tuned head
+    # whose logits are larger (1.1e-2 on the first Kaggle smoke run, with the decision logits
+    # within 3e-6). `onnx_matches_pytorch` checks what the backend reads instead.
     export = [sys.executable, str(source / EXPORTER), str(checkpoint), "--out", str(out)]
-    subprocess.run([*export, "--verify", "--force"], check=True)
+    subprocess.run([*export, "--force"], check=True)
     return out / checkpoint.name
+
+
+def answer_numbers(answers: dict[str, Any]) -> dict[str, float]:
+    """Every probability the backend reads from Laya's answers, flat."""
+    numbers = {}
+    for name in LAYA_ANSWERS:
+        answer = answers[name]
+        if SCHEMA[name]["type"] == "noul":
+            numbers[name] = float(answer["noul"])
+        else:
+            for option, p in answer["probabilities"].items():
+                numbers[f"{name}/{option}"] = float(p)
+    return numbers
+
+
+def onnx_matches_pytorch(checkpoint: Path, stage: Path, rows: list[dict[str, Any]]) -> float:
+    """The largest difference between the ONNX graph's and PyTorch's answers on `rows`; stops
+    the run past PARITY_TOLERANCE."""
+    from laya.agent import Agent
+    from laya.onnx_agent import ONNXAgent
+
+    torch_agent = Agent(str(checkpoint), device="cpu")
+    onnx_agent = ONNXAgent(str(stage), onnx_path=str(stage / "onnx" / "model.onnx"))
+    worst = 0.0
+    for row in rows:
+        want = answer_numbers(torch_agent.system_one(row["text"], QUESTIONS)["answers"])
+        got = answer_numbers(onnx_agent.system_one(row["text"], QUESTIONS)["answers"])
+        worst = max(worst, *(abs(want[key] - got[key]) for key in want))
+    if worst > PARITY_TOLERANCE:
+        raise SystemExit(f"ONNX differs from PyTorch by {worst:.2e} (> {PARITY_TOLERANCE})")
+    return worst
 
 
 def train(data: Path, base: str, out: Path, args: argparse.Namespace) -> dict[str, Any]:
@@ -386,7 +420,11 @@ def main() -> None:
     print(f"Exported and verified: {export}", flush=True)
     stage = args.out / "publish"
     stage_upload(checkpoint, export, stage)
-    report = check_published(stage, read_jsonl(SEED_FILE))
+    seed = read_jsonl(SEED_FILE)
+    parity = onnx_matches_pytorch(checkpoint, stage, seed[:PARITY_ROWS])
+    print(f"ONNX matches PyTorch within {parity:.2e} on {PARITY_ROWS} sentences", flush=True)
+    report = check_published(stage, seed)
+    report["onnx_vs_pytorch_max_difference"] = parity
     (stage / "load_check.json").write_text(json.dumps(report, indent=2), "utf-8")
     print(json.dumps(report, indent=2), flush=True)
     if not args.push_tag:

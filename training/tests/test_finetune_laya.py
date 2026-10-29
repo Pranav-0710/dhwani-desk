@@ -200,7 +200,7 @@ def test_a_token_that_cannot_reach_the_repo_stops_before_training(
         ft.ready_to_publish("kn-ft-v1")
 
 
-def test_the_exporter_checks_against_our_weights(
+def test_the_exporter_is_called_at_the_pinned_commit(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     calls: list[list[str]] = []
@@ -212,12 +212,10 @@ def test_the_exporter_checks_against_our_weights(
     export = ft.export_onnx(checkpoint, tmp_path / "work")
 
     assert export == tmp_path / "work" / "export" / "ckpt"
-    # Beside the exporter's output, where it looks before the Hugging Face cache.
-    assert (tmp_path / "work" / "export" / "model.safetensors").read_text("utf-8") == "ours"
     assert calls[0][-3:] == ["checkout", "-q", ft.EXPORTER_COMMIT]
     assert calls[1][1:] == [
         str(tmp_path / "laya-src" / ft.EXPORTER), str(checkpoint),
-        "--out", str(tmp_path / "work" / "export"), "--verify", "--force",
+        "--out", str(tmp_path / "work" / "export"), "--force",
     ]  # fmt: skip
 
 
