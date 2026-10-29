@@ -17,6 +17,7 @@ Writes `eval/reports/<name>.md` and `.json`; numbers are never typed by hand.
 import argparse
 import json
 import statistics
+import sys
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -306,9 +307,7 @@ def report(results: dict[str, Any], set_name: str, note: str) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--set", choices=["test", "seed"], default="test")
-    parser.add_argument(
-        "--test-file", type=Path, help="the test set JSONL (default for --set test)"
-    )
+    parser.add_argument("--test-file", type=Path, help="the test set JSONL (needed for --set test)")
     parser.add_argument("--transcripts", type=Path, help="transcribe.py's output")
     parser.add_argument("--no-keyword", action="store_true", help="skip the keyword stand-in")
     parser.add_argument(
@@ -320,6 +319,8 @@ def main() -> None:
     )
     parser.add_argument("--name", help="report file name (default: the set and today's date)")
     args = parser.parse_args()
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
 
     if args.set == "seed":
         rows, note = (

@@ -1,0 +1,510 @@
+{
+ "keyword": {
+  "revision": "keyword-standin-1",
+  "text": {
+   "n": 50,
+   "department": {
+    "accuracy": 0.9,
+    "macro_f1": 0.9122448979591836
+   },
+   "ward": {
+    "accuracy": 0.98
+   },
+   "urgency": {
+    "accuracy": 0.52
+   },
+   "caller_state": {
+    "accuracy": 0.76
+   },
+   "safety_hazard": {
+    "recall": 0.6666666666666666,
+    "precision": 0.9090909090909091,
+    "raised": 11,
+    "true": 15
+   },
+   "has_location": {
+    "recall": 1.0,
+    "precision": 0.84,
+    "raised": 25,
+    "true": 21
+   },
+   "repeat_complaint": {
+    "recall": 0.6666666666666666,
+    "precision": 0.6666666666666666,
+    "raised": 6,
+    "true": 6
+   },
+   "wants_human": {
+    "recall": 1.0,
+    "precision": 1.0,
+    "raised": 3,
+    "true": 3
+   },
+   "out_of_scope": {
+    "recall": 0.8,
+    "precision": 0.8,
+    "raised": 5,
+    "true": 5
+   },
+   "contains_personal_id": {
+    "recall": 1.0,
+    "precision": 1.0,
+    "raised": 2,
+    "true": 2
+   },
+   "latency": {
+    "safety_step_p95_s": 1.3799999578623101e-05,
+    "whole_decision_p95_s": 9.189999946102034e-05,
+    "whole_decision_median_s": 2.525000036257552e-05
+   },
+   "mistakes": [
+    {
+     "id": "seed-004",
+     "department": [
+      "water",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-008",
+     "department": [
+      "water",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-012",
+     "department": [
+      "sewage-drainage",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-026",
+     "department": [
+      "roads",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-029",
+     "department": [
+      "roads",
+      "other"
+     ]
+    }
+   ]
+  }
+ },
+ "zero-shot": {
+  "revision": "laya:multilingual@local",
+  "text": {
+   "n": 50,
+   "department": {
+    "accuracy": 0.3,
+    "macro_f1": 0.2523519163763066
+   },
+   "ward": {
+    "accuracy": 1.0
+   },
+   "urgency": {
+    "accuracy": 0.24
+   },
+   "caller_state": {
+    "accuracy": 0.36
+   },
+   "safety_hazard": {
+    "recall": 0.06666666666666667,
+    "precision": 1.0,
+    "raised": 1,
+    "true": 15
+   },
+   "has_location": {
+    "recall": 0.23809523809523808,
+    "precision": 0.7142857142857143,
+    "raised": 7,
+    "true": 21
+   },
+   "repeat_complaint": {
+    "recall": 0.0,
+    "precision": null,
+    "raised": 0,
+    "true": 6
+   },
+   "wants_human": {
+    "recall": 0.0,
+    "precision": 0.0,
+    "raised": 1,
+    "true": 3
+   },
+   "out_of_scope": {
+    "recall": 0.0,
+    "precision": 0.0,
+    "raised": 3,
+    "true": 5
+   },
+   "contains_personal_id": {
+    "recall": 1.0,
+    "precision": 1.0,
+    "raised": 2,
+    "true": 2
+   },
+   "latency": {
+    "safety_step_p95_s": 0.3926071999994747,
+    "whole_decision_p95_s": 1.1837835000005725,
+    "whole_decision_median_s": 1.0519965499997852
+   },
+   "mistakes": [
+    {
+     "id": "seed-001",
+     "department": [
+      "water",
+      "roads"
+     ]
+    },
+    {
+     "id": "seed-002",
+     "department": [
+      "water",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-003",
+     "department": [
+      "water",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-004",
+     "department": [
+      "water",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-005",
+     "department": [
+      "water",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-006",
+     "department": [
+      "water",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "seed-007",
+     "department": [
+      "water",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-008",
+     "department": [
+      "water",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-009",
+     "department": [
+      "sewage-drainage",
+      "roads"
+     ]
+    },
+    {
+     "id": "seed-010",
+     "department": [
+      "sewage-drainage",
+      "roads"
+     ]
+    },
+    {
+     "id": "seed-011",
+     "department": [
+      "sewage-drainage",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-013",
+     "department": [
+      "sewage-drainage",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-014",
+     "department": [
+      "sewage-drainage",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-015",
+     "department": [
+      "sewage-drainage",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-016",
+     "department": [
+      "sewage-drainage",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-018",
+     "department": [
+      "solid-waste",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-019",
+     "department": [
+      "solid-waste",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-020",
+     "department": [
+      "solid-waste",
+      "roads"
+     ]
+    },
+    {
+     "id": "seed-021",
+     "department": [
+      "solid-waste",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-022",
+     "department": [
+      "solid-waste",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-023",
+     "department": [
+      "solid-waste",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "seed-025",
+     "department": [
+      "roads",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-027",
+     "department": [
+      "roads",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-028",
+     "department": [
+      "roads",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-029",
+     "department": [
+      "roads",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-031",
+     "department": [
+      "streetlights",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-032",
+     "department": [
+      "streetlights",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-033",
+     "department": [
+      "streetlights",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-034",
+     "department": [
+      "streetlights",
+      "roads"
+     ]
+    },
+    {
+     "id": "seed-035",
+     "department": [
+      "streetlights",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-036",
+     "department": [
+      "streetlights",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-037",
+     "department": [
+      "streetlights",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-040",
+     "department": [
+      "stray-animals",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-042",
+     "department": [
+      "stray-animals",
+      "roads"
+     ]
+    },
+    {
+     "id": "seed-043",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    }
+   ]
+  }
+ },
+ "fine-tuned": {
+  "revision": "laya:ckpt-kn-ft-v1@local",
+  "text": {
+   "n": 50,
+   "department": {
+    "accuracy": 0.88,
+    "macro_f1": 0.8832548403976974
+   },
+   "ward": {
+    "accuracy": 1.0
+   },
+   "urgency": {
+    "accuracy": 0.88
+   },
+   "caller_state": {
+    "accuracy": 0.72
+   },
+   "safety_hazard": {
+    "recall": 1.0,
+    "precision": 0.9375,
+    "raised": 16,
+    "true": 15
+   },
+   "has_location": {
+    "recall": 0.9523809523809523,
+    "precision": 0.8333333333333334,
+    "raised": 24,
+    "true": 21
+   },
+   "repeat_complaint": {
+    "recall": 0.3333333333333333,
+    "precision": 1.0,
+    "raised": 2,
+    "true": 6
+   },
+   "wants_human": {
+    "recall": 1.0,
+    "precision": 1.0,
+    "raised": 3,
+    "true": 3
+   },
+   "out_of_scope": {
+    "recall": 1.0,
+    "precision": 1.0,
+    "raised": 5,
+    "true": 5
+   },
+   "contains_personal_id": {
+    "recall": 1.0,
+    "precision": 1.0,
+    "raised": 2,
+    "true": 2
+   },
+   "latency": {
+    "safety_step_p95_s": 0.3847349000006943,
+    "whole_decision_p95_s": 1.148236499999257,
+    "whole_decision_median_s": 1.04646645000048
+   },
+   "mistakes": [
+    {
+     "id": "seed-005",
+     "department": [
+      "water",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-007",
+     "department": [
+      "water",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-008",
+     "department": [
+      "water",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-013",
+     "department": [
+      "sewage-drainage",
+      "other"
+     ]
+    },
+    {
+     "id": "seed-016",
+     "department": [
+      "sewage-drainage",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "seed-020",
+     "department": [
+      "solid-waste",
+      "stray-animals"
+     ]
+    }
+   ]
+  }
+ }
+}
