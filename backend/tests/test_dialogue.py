@@ -12,6 +12,7 @@ from dialogue.machine import (
     MAX_UNROUTED_TURNS,
     CountingDesk,
     Dialogue,
+    OfficerError,
     State,
 )
 from dialogue.templates import LINE_KEYS, load_templates, placeholders
@@ -329,3 +330,110 @@ def test_only_lines_without_placeholders_are_cached() -> None:
     assert TEMPLATES.lines["greeting"] in fixed
     assert TEMPLATES.lines["read_back_ward"] not in fixed
     assert len(fixed) == len(TEMPLATES.lines) - 2  # both read-back lines carry the ticket
+
+
+# Every escalation rule in the PRD's table, just above and exactly at its threshold: rules fire
+# only above it.
+@pytest.mark.parametrize(
+    ("change", "fires", "keys", "reason"),
+    [
+        ({"safety_hazard": 0.61}, True, ("safety",), "safety"),
+        ({"safety_hazard": 0.6}, False, None, None),
+        ({"urgency": "emergency"}, True, ("safety",), "safety"),
+        ({"urgency": "urgent"}, False, None, None),
+        ({"wants_human": 0.71}, True, ("handoff_human",), "wants_human"),
+        ({"wants_human": 0.7}, False, None, None),
+        ({"caller_state": "distressed"}, True, ("handoff_calm",), "distressed"),
+        ({"caller_state": "abusive"}, True, ("handoff_calm",), "abusive"),
+        ({"caller_state": "frustrated"}, False, None, None),
+        ({"out_of_scope": 0.71}, True, ("redirect",), "out_of_scope"),
+        ({"out_of_scope": 0.7}, False, None, None),
+    ],
+)
+def test_each_escalation_rule_fires_only_above_its_threshold(
+    change: dict, fires: bool, keys: tuple[str, ...] | None, reason: str | None
+) -> None:
+    call, _ = dialogue(dataclasses.replace(ROADS_IN_W04, **change))
+    reply = call.turn("...")
+    if fires:
+        assert (reply.keys, reply.reason) == (keys, reason)
+    else:
+        assert reply.reason == "ticket"
+
+
+def test_an_officer_can_take_over_a_call_the_agent_was_handling() -> None:
+    call, _ = dialogue(ROADS)
+    call.turn("ರೋಡ್ ಹಾಳಾಗಿದೆ")
+    reply = call.take_over()
+    assert (reply.keys, reply.state, reply.reason) == ((), State.HANDED_OFF, "taken_over")
+    assert call.officer
+    assert reply.to_client(call.slots, call.officer)["officer"] is True
+
+
+def test_an_officer_speaks_only_on_a_call_they_have_taken() -> None:
+    call, _ = dialogue(dataclasses.replace(ROADS, safety_hazard=0.9))
+    call.turn("ವೈರ್ ಬಿದ್ದಿದೆ")
+    with pytest.raises(OfficerError):
+        call.officer_says("ನಮಸ್ಕಾರ")  # handed off, but nobody has taken it yet
+    call.take_over()
+    assert call.officer_says("  ದಯವಿಟ್ಟು   ದೂರ ಇರಿ ") == "ದಯವಿಟ್ಟು ದೂರ ಇರಿ"
+    for bad in ("   ", "ಅ" * 301):
+        with pytest.raises(OfficerError):
+            call.officer_says(bad)
+
+
+def test_a_closed_call_cannot_be_taken_over_or_handed_back() -> None:
+    call, _ = dialogue(ROADS_IN_W04)
+    call.turn("ಗಾಂಧಿನಗರ ರೋಡ್")
+    with pytest.raises(OfficerError):
+        call.take_over()
+    with pytest.raises(OfficerError):
+        call.hand_back()
+
+
+def test_after_a_hand_back_the_agent_finishes_the_call_with_what_the_officer_heard() -> None:
+    # The live wire is still in the transcript after the hand-back: the officer has dealt with
+    # it, so it must not hand the call straight back.
+    danger = dataclasses.replace(ROADS, safety_hazard=0.9)
+    call, decider = dialogue(danger, dataclasses.replace(ROADS_IN_W04, safety_hazard=0.9))
+    assert call.turn("ವೈರ್ ಬಿದ್ದಿದೆ").keys == ("safety",)
+    call.take_over()
+    assert call.turn("ಗಾಂಧಿನಗರ ಸ್ಕೂಲ್ ಹತ್ತಿರ").keys == ()  # said to the officer: kept
+    assert call.hand_back().keys == ("hand_back",)
+    assert (call.state, call.officer) == (State.LISTENING, False)
+
+    reply = call.rethink()
+
+    assert decider.transcripts[-1] == "ವೈರ್ ಬಿದ್ದಿದೆ ಗಾಂಧಿನಗರ ಸ್ಕೂಲ್ ಹತ್ತಿರ"
+    assert (reply.keys, reply.reason) == (("read_back_ward", "closing"), "ticket")
+
+
+def test_a_hand_back_does_not_bounce_on_other_rules_the_old_words_trip() -> None:
+    # A frightened caller at a live wire: once the officer hands back, neither the danger nor
+    # the distress already dealt with may hand the call straight back.
+    scared = dataclasses.replace(ROADS_IN_W04, safety_hazard=0.9, caller_state="distressed")
+    call, _ = dialogue(scared, scared)
+    assert call.turn("ವೈರ್ ಬಿದ್ದಿದೆ, ತುಂಬಾ ಭಯ ಆಗ್ತಿದೆ").keys == ("safety",)
+    call.hand_back()
+    reply = call.rethink()
+    assert (reply.keys, reply.reason) == (("read_back_ward", "closing"), "ticket")
+    assert reply.ticket is not None and reply.ticket.urgency == "soon"
+
+
+@pytest.mark.parametrize(
+    ("change", "keys"),
+    [({"safety_hazard": 0.9}, ("safety",)), ({"wants_human": 0.9}, ("handoff_human",))],
+    ids=["new_danger", "asks_for_officer"],
+)
+def test_what_the_caller_says_after_a_hand_back_can_hand_off_again(
+    change: dict, keys: tuple[str, ...]
+) -> None:
+    danger = dataclasses.replace(ROADS, safety_hazard=0.9)
+    call, decider = dialogue(danger, ROADS, dataclasses.replace(ROADS, **change))
+    call.turn("ವೈರ್ ಬಿದ್ದಿದೆ")
+    call.hand_back()  # handed back without being taken over: allowed
+    assert call.rethink().keys == ("ask_location",)
+    reply = call.turn("ಈಗ ಇನ್ನೊಂದು ಕಡೆ ಬೆಂಕಿ ಬಿದ್ದಿದೆ")
+    assert reply.keys == keys
+    # Only the words since the hand-back were screened for a hand-off.
+    assert "ಈಗ ಇನ್ನೊಂದು ಕಡೆ ಬೆಂಕಿ ಬಿದ್ದಿದೆ" in decider.transcripts

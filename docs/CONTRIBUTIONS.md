@@ -7,7 +7,7 @@ Lakshmi Narasimman was away until 2026-10-16. In that time Jey Pranav also did t
 | Area | Jey Pranav | Lakshmi Narasimman |
 | --- | --- | --- |
 | Gnani integration | Prisma realtime STT client and proxy; Timbre TTS client and voice choice; browser call path | |
-| Dialogue and escalation | Dialogue state machine, Kannada reply templates, escalation order | |
+| Dialogue and escalation | Dialogue state machine, Kannada reply templates, escalation order; officer take-over and hand-back | |
 | Laya (benchmark, fine-tuning, serving) | Week-1 Kannada benchmark and go/no-go decision; ONNX serving in the call, safety-first decisions, latency report | |
 | Data and evaluation | Decision schema, fictional wards, seed set; synthetic data generator with consistency and meaning checks | |
 | Console and phone UI | Phone page: browser mic capture and agent playback | |
@@ -30,3 +30,4 @@ Lakshmi Narasimman was away until 2026-10-16. In that time Jey Pranav also did t
 | 2026-10-16 | Jey Pranav | #39 | Two-person workflow: CODEOWNERS, required review, contributions backfill (#38) |
 | 2026-10-19 | Jey Pranav | #40 | Tickets: SQLite store, masking across turns, transcript retention, console API (#17) |
 | 2026-10-23 | Jey Pranav | #42 | Laya serving: ONNX decider, safety questions first, "one moment" line, latency report (#15) |
+| 2026-10-23 | Jey Pranav | #43 | Officer take-over: console socket, typed replies spoken by Timbre, hand-back, thresholds API (#16) |

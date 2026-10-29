@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import functools
+import hmac
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -11,8 +12,10 @@ from audio.outbox import Outbox
 from audio.speaker import Speaker
 from audio.tts_cache import AudioCache, CachedSpeech
 from config import Settings, get_settings
+from decisions import thresholds
 from dialogue.decision import Decider, Decision, Screening
-from dialogue.machine import Dialogue, Reply, State
+from dialogue.live import LiveCall, LiveCalls, OfficerCommand
+from dialogue.machine import Dialogue, OfficerError, Reply, State
 from dialogue.standin import KeywordDecider
 from dialogue.templates import load_templates
 from dialogue.turns import TURN_PAUSE_S, TurnCollector
@@ -116,6 +119,14 @@ turn_pause_s = TURN_PAUSE_S
 hold_on_after_s = 0.3
 # After the last line of a closed call has played, wait this long before hanging up.
 HANG_UP_GRACE_S = 0.5
+# A console must say hello with the token within this long.
+CONSOLE_HELLO_TIMEOUT_S = 5.0
+# Longest a console waits for a call to carry out an officer command (a decision may be
+# running on the call).
+OFFICER_COMMAND_TIMEOUT_S = 10.0
+
+# The calls in progress, and the consoles watching them.
+live_calls = LiveCalls()
 
 TEMPLATES = load_templates()
 TTS_CACHE: AudioCache = {}
@@ -137,6 +148,98 @@ def get_ticket(number: int = Path(ge=FIRST_NUMBER, le=2**31)) -> dict[str, Any]:
     if (ticket := get_ticket_store().ticket(number)) is None:
         raise HTTPException(status_code=404, detail="No such ticket")
     return ticket
+
+
+@app.get("/api/thresholds")
+def get_thresholds() -> dict[str, Any]:
+    """The escalation thresholds, for the console's decision bars."""
+    return thresholds.as_dict()
+
+
+@app.websocket("/ws/console")
+async def console(websocket: WebSocket) -> None:
+    """A supervisor console: watch every live call, take one over, speak on it, hand it back.
+
+    Contract (see backend/README.md): the console first sends `hello` with `CONSOLE_TOKEN`.
+    It then gets `calls` (every live call, and the thresholds), followed by `call_started`,
+    `call_event` (a message the caller's browser got) and `call_closed` as they happen. It may
+    send `take_over`, `say` (`text`) and `hand_back`, each with a `call_id` and an optional `id`
+    echoed in the answer: `done`, or `error` with a `message`.
+    """
+    await websocket.accept()
+    token = get_settings().console_token.get_secret_value()
+    if not token:
+        await _fail(websocket, "CONSOLE_TOKEN is not set")
+        return
+    try:
+        hello = await asyncio.wait_for(websocket.receive_json(), CONSOLE_HELLO_TIMEOUT_S)
+    except (TimeoutError, WebSocketDisconnect, KeyError, ValueError):
+        hello = None
+    is_hello = isinstance(hello, dict) and hello.get("type") == "hello"
+    offered = hello.get("token") if is_hello else None
+    if not isinstance(offered, str) or not hmac.compare_digest(offered.encode(), token.encode()):
+        await _send_and_close(websocket, {"type": "error", "message": "Not allowed"}, code=1008)
+        return
+
+    outbox = Outbox(websocket)
+    with live_calls.watch() as watcher:
+        calls = [call.summary() for call in live_calls]
+        await outbox.json({"type": "calls", "calls": calls, "thresholds": thresholds.as_dict()})
+
+        async def send_events() -> None:
+            while (message := await watcher.messages.get()) is not None:
+                await outbox.json(message)
+            await outbox.json({"type": "error", "message": "Fell too far behind; reconnect"})
+
+        async def take_commands() -> None:
+            while True:
+                try:
+                    message = await websocket.receive_json()
+                except (KeyError, ValueError):
+                    await outbox.json({"type": "error", "message": "Send JSON text messages"})
+                    continue
+                await outbox.json(await _carry_out(message))
+
+        tasks = [asyncio.create_task(send_events()), asyncio.create_task(take_commands())]
+        try:
+            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+    with contextlib.suppress(RuntimeError, WebSocketDisconnect):
+        await websocket.close(code=1000)
+
+
+async def _carry_out(message: Any) -> dict[str, Any]:
+    """Queue one officer command for its call's route and wait until it is carried out."""
+    if not isinstance(message, dict):
+        return {"type": "error", "message": "Send a JSON object"}
+    kind, call_id = message.get("type"), message.get("call_id")
+    answer: dict[str, Any] = {"command": kind, "call_id": call_id}
+    if isinstance(message.get("id"), str | int):
+        answer["id"] = message["id"]
+    if kind not in ("take_over", "say", "hand_back"):
+        return {"type": "error", "message": "Unknown command", **answer}
+    call = live_calls.get(call_id) if isinstance(call_id, str) else None
+    if call is None:
+        return {"type": "error", "message": "No such call", **answer}
+    text = message.get("text", "")
+    if not isinstance(text, str):
+        return {"type": "error", "message": "`text` must be a string", **answer}
+    command = OfficerCommand(kind, text)
+    call.commands.put_nowait(command)
+    try:
+        await asyncio.wait_for(asyncio.shield(command.done), OFFICER_COMMAND_TIMEOUT_S)
+    except (OfficerError, LookupError) as error:
+        return {"type": "error", "message": str(error), **answer}
+    except TimeoutError:
+        return {"type": "error", "message": "The call did not answer in time", **answer}
+    finally:
+        # Not carried out yet (timed out, or the console left): it never will be, so an
+        # officer who tries again is not heard twice.
+        command.done.cancel()
+    return {"type": "done", **answer}
 
 
 @app.websocket("/ws/stt")
@@ -181,9 +284,25 @@ async def call(websocket: WebSocket) -> None:
     if not settings.gnani_api_key.get_secret_value():
         await _fail(websocket, "GNANI_API_KEY is not set")
         return
-    outbox = Outbox(websocket)
     store = get_ticket_store()
     dialogue = Dialogue(TEMPLATES, get_decider(), store)
+    # Every message the caller's browser gets is copied to the supervisor consoles.
+    outbox = Outbox(websocket, watch=functools.partial(live_calls.publish, dialogue.call_id))
+    live = live_calls.open(dialogue)
+    try:
+        await _converse(websocket, settings, outbox, store, dialogue, live)
+    finally:
+        live_calls.close(dialogue.call_id)
+
+
+async def _converse(
+    websocket: WebSocket,
+    settings: Settings,
+    outbox: Outbox,
+    store: TicketStore,
+    dialogue: Dialogue,
+    live: LiveCall,
+) -> None:
     turns = TurnCollector(turn_pause_s)
     config = {
         "type": "config",
@@ -212,10 +331,12 @@ async def call(websocket: WebSocket) -> None:
             # a late Prisma event is never sent down a closed socket.
             agent_hung_up.set()
 
-        async def answer(reply: Reply) -> None:
-            if not reply.keys and reply.decision is None:
-                return  # nothing to say and nothing new to show
-            await outbox.json(reply.to_client(dialogue.slots))
+        async def answer(reply: Reply, *, show: bool = False) -> None:
+            """Send the reply's `dialogue` event and say its lines. One with no lines and no
+            decision is sent only when `show` says the state change matters on its own."""
+            if not (reply.keys or reply.decision or show):
+                return
+            await outbox.json(reply.to_client(dialogue.slots, dialogue.officer))
             for line in reply.lines:
                 speaker.say(line)
             if reply.state is State.CLOSED:
@@ -242,47 +363,112 @@ async def call(websocket: WebSocket) -> None:
                 personal_id,
             )
 
-        async def hand_off_on_failure() -> None:
-            logger.exception("Deciding a caller turn failed; handing off")
-            # No decision says whether the turn holds a personal number: mask as if it did.
-            await record_turn(1.0)
-            await answer(dialogue.decider_failed())
+        async def decide(new_turn: bool) -> None:
+            """Decide on the whole call and answer, in the steps `Dialogue.turn` takes in one
+            go. `new_turn`: the last turn is new and not stored yet (not so when deciding again
+            after a hand-back)."""
+            transcript = dialogue.transcript
+
+            async def store_turn(personal_id: float) -> None:
+                if new_turn:
+                    await record_turn(personal_id)
+
+            async def hand_off_on_failure() -> None:
+                logger.exception("Deciding a caller turn failed; handing off")
+                # No decision says whether the turn holds a personal number: mask as if it did.
+                await store_turn(1.0)
+                await answer(dialogue.decider_failed())
+
+            async def screen_whole_call(first: Screening | None) -> Screening:
+                # The first step already read the whole call, unless it was handed back.
+                if first is not None and escalation_text == transcript:
+                    return first
+                return await asyncio.to_thread(dialogue.decider.screen, transcript)
+
+            # What can hand the call off: the whole call, or only what was said since an
+            # officer handed it back (nothing yet, right after a hand-back).
+            escalation_text = dialogue.escalation_text()
+            try:
+                first = None
+                if escalation_text:
+                    first = await asyncio.to_thread(dialogue.decider.screen, escalation_text)
+            except Exception:
+                await hand_off_on_failure()
+                return
+            if first is not None and (handed_off := dialogue.screened(first)) is not None:
+                # Safety first: the turn is stored and the hand-off said before the rest is
+                # decided, since a caller told to call 112 may hang up at once. Masked as if it
+                # held a personal number, as no decision says otherwise yet. The rest follows
+                # for the officer as a `dialogue` event with no lines.
+                await store_turn(1.0)
+                await answer(handed_off)
+                try:
+                    screening = await screen_whole_call(first)
+                    decision = await asyncio.to_thread(
+                        dialogue.decider.decide, transcript, screening
+                    )
+                except Exception:
+                    logger.exception("Completing a decision after a hand-off failed")
+                    return
+                await answer(dialogue.complete(decision))
+                return
+            try:
+                screening = await screen_whole_call(first)
+                decision = await decide_holding_on(transcript, screening)
+            except Exception:
+                await hand_off_on_failure()
+                return
+            await store_turn(decision.contains_personal_id)
+            await answer(dialogue.respond(decision))
+
+        async def obey(command: OfficerCommand) -> None:
+            if command.done.done():
+                return  # the console stopped waiting for it: too late to carry it out
+            try:
+                if command.kind == "take_over":
+                    await answer(dialogue.take_over(), show=True)
+                elif command.kind == "say":
+                    speaker.say(dialogue.officer_says(command.text))
+                else:
+                    await answer(dialogue.hand_back())
+                if not command.done.done():
+                    command.done.set_result(None)
+            except OfficerError as error:
+                if not command.done.done():
+                    command.done.set_exception(error)
+                return
+            finally:
+                # Cancelled mid-command, or the caller's socket failed: never leave the
+                # console waiting.
+                if not command.done.done():
+                    command.done.set_exception(LookupError("The call has ended"))
+            if command.kind == "hand_back" and dialogue.turns:
+                # What the caller told the officer counts too.
+                await decide(new_turn=False)
+
+        # Caller turns and officer commands, one at a time: only this task changes the
+        # dialogue, so a hand-back never races a decision on a caller turn.
+        work: asyncio.Queue[str | OfficerCommand] = asyncio.Queue()
+
+        async def collect(source: asyncio.Queue[Any]) -> None:
+            while True:
+                await work.put(await source.get())
 
         async def answer_turns() -> None:
             # Only the decider runs in threads (it may be slow); the dialogue changes here, on
             # the event loop, so a call that ends while a decision is running files nothing.
             while True:
-                transcript = dialogue.hear(await turns.turns.get())
-                if transcript is None:
+                item = await work.get()
+                if isinstance(item, OfficerCommand):
+                    await obey(item)
                     continue
-                try:
-                    screening = await asyncio.to_thread(dialogue.decider.screen, transcript)
-                except Exception:
-                    await hand_off_on_failure()
-                    continue
-                if (handed_off := dialogue.screened(screening)) is not None:
-                    # Safety first: the turn is stored and the hand-off said before the rest is
-                    # decided, since a caller told to call 112 may hang up at once. Masked as if
-                    # it held a personal number, as no decision says otherwise yet. The rest
-                    # follows for the officer as a `dialogue` event with no lines.
+                turns_before = len(dialogue.turns)
+                if dialogue.hear(item) is not None:
+                    await decide(new_turn=True)
+                elif len(dialogue.turns) > turns_before:
+                    # Said while the call was handed off: kept, and masked as if it held a
+                    # personal number, since nothing decides on it now.
                     await record_turn(1.0)
-                    await answer(handed_off)
-                    try:
-                        decision = await asyncio.to_thread(
-                            dialogue.decider.decide, transcript, screening
-                        )
-                    except Exception:
-                        logger.exception("Completing a decision after a hand-off failed")
-                        continue
-                    await answer(dialogue.complete(decision))
-                    continue
-                try:
-                    decision = await decide_holding_on(transcript, screening)
-                except Exception:
-                    await hand_off_on_failure()
-                    continue
-                await record_turn(decision.contains_personal_id)
-                await answer(dialogue.respond(decision))
 
         async def converse(event: SttEvent) -> None:
             if agent_hung_up.is_set():
@@ -293,6 +479,8 @@ async def call(websocket: WebSocket) -> None:
             elif event.type == "transcript":
                 turns.add(event.text)
 
+        background.append(asyncio.create_task(collect(turns.turns)))
+        background.append(asyncio.create_task(collect(live.commands)))
         background.append(asyncio.create_task(answer_turns()))
         try:
             final = await _stt_session(
@@ -302,6 +490,9 @@ async def call(websocket: WebSocket) -> None:
             for task in background:
                 task.cancel()
             await asyncio.gather(*background, return_exceptions=True)
+            while not work.empty():
+                if isinstance(item := work.get_nowait(), OfficerCommand) and not item.done.done():
+                    item.done.set_exception(LookupError("The call has ended"))
             await turns.aclose()
             await speaker.aclose()
     if final:
