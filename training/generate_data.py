@@ -17,13 +17,15 @@ from Kaggle / Colab secrets.
 """
 
 import argparse
+import functools
 import json
 import os
 import random
 import re
+import time
 import unicodedata
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +41,7 @@ SEED: list[dict[str, Any]] = [
     if line.strip()
 ]
 
-DEFAULT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+DEFAULT_MODEL = "Qwen/Qwen3-14B"  # chosen in the pilots; see 02_generate_data.ipynb
 
 DEPARTMENT_WEIGHTS = {
     "water": 0.16,
@@ -350,6 +352,57 @@ def problems(text: str, spec: dict[str, Any]) -> list[str]:
     return reasons
 
 
+ALL_SCENARIOS = [
+    scenario["en"]
+    for pool in [*TEMPLATES["scenarios"].values(), TEMPLATES["out_of_scope"]]
+    for scenario in pool
+]
+NONE_OF_THESE = "none of these"
+CHECK_SYSTEM = "You read Kannada speech-to-text transcripts and answer questions about them."
+CHECK_DISTRACTORS = 3
+
+
+def build_check(
+    text: str, spec: dict[str, Any], rng: random.Random
+) -> tuple[list[dict[str, str]], list[str], int]:
+    """A question the model answers about its own sentence without seeing the request.
+
+    The options are every scenario of the spec's pool (siblings differ in urgency and hazard),
+    a few from other departments, and "none of these". Returns the messages, the options and
+    the number of the right one.
+    """
+    labels = spec["labels"]
+    pool = (
+        TEMPLATES["out_of_scope"]
+        if labels["out_of_scope"]
+        else TEMPLATES["scenarios"][labels["department"]]
+    )
+    own = [scenario["en"] for scenario in pool]
+    elsewhere = [scenario for scenario in ALL_SCENARIOS if scenario not in own]
+    options = own + rng.sample(elsewhere, CHECK_DISTRACTORS)
+    rng.shuffle(options)
+    options.append(NONE_OF_THESE)
+    user = "\n".join(
+        [
+            "A caller to a city corporation helpline said this "
+            "(a speech-to-text transcript in Kannada):",
+            "",
+            text,
+            "",
+            "Which option best describes what the caller is reporting? "
+            "Reply with the option number only.",
+            *[f"{number}. {option}" for number, option in enumerate(options, 1)],
+        ]
+    )
+    messages = [{"role": "system", "content": CHECK_SYSTEM}, {"role": "user", "content": user}]
+    return messages, options, options.index(spec["scenario"]) + 1
+
+
+def parse_choice(reply: str) -> int | None:
+    match = re.search(r"\d+", reply)
+    return int(match.group()) if match else None
+
+
 def dedup_key(text: str) -> str:
     return re.sub(r"\s+", "", text)
 
@@ -385,11 +438,17 @@ def complete(
     model: Any,
     tokenizer: Any,
     conversations: list[list[dict[str, str]]],
-    temperature: float,
+    temperature: float | None,
     max_new_tokens: int,
 ) -> list[str]:
+    """One reply per conversation: sampled at `temperature`, or greedy when it is None."""
     import torch
 
+    sampling = (
+        {"do_sample": True, "temperature": temperature, "top_p": 0.95}
+        if temperature is not None
+        else {"do_sample": False}
+    )
     prompts = [
         # enable_thinking=False turns off reasoning traces on models that have them (Qwen3);
         # other chat templates ignore it.
@@ -402,9 +461,7 @@ def complete(
     with torch.no_grad():
         output = model.generate(
             **batch,
-            do_sample=True,
-            temperature=temperature,
-            top_p=0.95,
+            **sampling,
             max_new_tokens=max_new_tokens,
             pad_token_id=tokenizer.pad_token_id,
         )
@@ -418,6 +475,16 @@ def chunks(items: list[Any], size: int) -> Iterator[list[Any]]:
         yield items[start : start + size]
 
 
+def rejection(
+    spec: dict[str, Any], attempt: int, reasons: list[str], reply: str, **extra: Any
+) -> dict[str, Any]:
+    return {"id": spec["id"], "attempt": attempt, "reasons": reasons, "reply": reply} | extra
+
+
+Rows = list[dict[str, Any]]
+Checkpoint = Callable[[Rows, Rows], None]
+
+
 def generate(
     specs: list[dict[str, Any]],
     model_name: str,
@@ -426,16 +493,44 @@ def generate(
     temperature: float,
     four_bit: bool,
     seed: int,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Rows that passed every check, and every failed attempt with its reasons."""
+    meaning_check: bool = True,
+    *,
+    previous: tuple[Rows, Rows] = ([], []),
+    checkpoint: Checkpoint | None = None,
+    checkpoint_every: int = 10,
+    deadline: float | None = None,
+) -> tuple[Rows, Rows, bool]:
+    """Rows that passed every check, every failed attempt with its reasons, and whether the
+    run finished (False when it stopped at `deadline`, a `time.monotonic()` value).
+
+    With `meaning_check`, a sentence that passes the text checks is shown back to the model
+    without the request, and kept only if the model picks the scenario it was written for.
+    That drops sentences that are well-formed but say something else (a light that is "on"
+    instead of "off", a wrong word for the animal), which the text checks cannot see.
+
+    `previous` continues an earlier run of the same specs: kept specs are skipped and failed
+    attempts count against `attempts`. `checkpoint` receives the rows so far every
+    `checkpoint_every` batches and when the run stops at the deadline.
+    """
     model, tokenizer = load_model(model_name, four_bit)
     rng = random.Random(seed)
-    seen = {dedup_key(row["text"]) for row in SEED}
-    accepted: list[dict[str, Any]] = []
-    rejected: list[dict[str, Any]] = []
-    pending = specs
-    for attempt in range(1, attempts + 1):
-        retry = []
+    accepted, rejected = list(previous[0]), list(previous[1])
+    kept_ids = {row["id"] for row in accepted}
+    seen = {dedup_key(row["text"]) for row in [*SEED, *accepted]}
+    tries = Counter(row["id"] for row in rejected)
+    pending = [s for s in specs if s["id"] not in kept_ids and tries[s["id"]] < attempts]
+    retry: list[dict[str, Any]] = []
+
+    def fail(spec: dict[str, Any], reasons: list[str], reply: str, **extra: Any) -> None:
+        tries[spec["id"]] += 1
+        rejected.append(rejection(spec, tries[spec["id"]], reasons, reply, **extra))
+        if tries[spec["id"]] < attempts:
+            retry.append(spec)
+
+    batches, round_number = 0, 0
+    while pending:
+        round_number += 1
+        retry.clear()
         for batch in chunks(pending, batch_size):
             replies = complete(
                 model,
@@ -444,16 +539,35 @@ def generate(
                 temperature,
                 max_new_tokens=MAX_NEW_TOKENS,
             )
+            candidates = []
             for spec, reply in zip(batch, replies, strict=True):
                 parsed = parse_reply(reply)
                 reasons = problems(parsed["text"], spec) if parsed else ["unparseable"]
-                if parsed and not reasons and dedup_key(parsed["text"]) in seen:
-                    reasons = ["duplicate"]
                 if reasons:
-                    rejected.append(
-                        {"id": spec["id"], "attempt": attempt, "reasons": reasons, "reply": reply}
-                    )
-                    retry.append(spec)
+                    fail(spec, reasons, reply)
+                else:
+                    candidates.append((spec, parsed, reply))
+
+            verdicts: list[str | None] = [None] * len(candidates)
+            if meaning_check and candidates:
+                checks = [build_check(parsed["text"], spec, rng) for spec, parsed, _ in candidates]
+                answers = complete(
+                    model, tokenizer, [messages for messages, _, _ in checks], None, 8
+                )
+                for index, ((_, options, right), answer) in enumerate(
+                    zip(checks, answers, strict=True)
+                ):
+                    picked = parse_choice(answer)
+                    if picked != right:
+                        valid = picked is not None and 1 <= picked <= len(options)
+                        verdicts[index] = options[picked - 1] if valid else answer.strip()
+
+            for (spec, parsed, reply), picked in zip(candidates, verdicts, strict=True):
+                if picked is not None:
+                    fail(spec, ["meaning_check_failed"], reply, picked=picked)
+                    continue
+                if dedup_key(parsed["text"]) in seen:
+                    fail(spec, ["duplicate"], reply)
                     continue
                 seen.add(dedup_key(parsed["text"]))
                 accepted.append(
@@ -465,16 +579,21 @@ def generate(
                             "scenario": spec["scenario"],
                             "location_form": spec["location"]["form"],
                             "model": model_name,
-                            "attempt": attempt,
+                            "attempt": tries[spec["id"]] + 1,
+                            "meaning_check": meaning_check,
                         },
                     }
                 )
-            print(f"attempt {attempt}: {len(accepted)} kept, {len(retry)} to retry", flush=True)
-        pending = retry
-        if not pending:
-            break
+            batches += 1
+            print(f"round {round_number}: {len(accepted)} kept, {len(retry)} to retry", flush=True)
+            out_of_time = deadline is not None and time.monotonic() > deadline
+            if checkpoint and (out_of_time or batches % checkpoint_every == 0):
+                checkpoint(accepted, rejected)
+            if out_of_time:
+                return accepted, rejected, False
+        pending = list(retry)
     accepted.sort(key=lambda row: row["id"])
-    return accepted, rejected
+    return accepted, rejected, True
 
 
 # --- report and output -------------------------------------------------------------------
@@ -539,7 +658,9 @@ def dataset_card(model_name: str, summary: dict[str, Any]) -> str:
             "Synthetic Kannada caller turns for fine-tuning Laya on the decisions in "
             "`data/decision_schema.json` of the dhwani-desk repo. Every sentence is "
             f"machine-written by `{model_name}` from a sampled spec; the labels come from the "
-            "spec, and a row is kept only if its text passes consistency checks. The city "
+            "spec, and a row is kept only if its text passes consistency checks and the model, "
+            "shown the sentence without the request, picks the scenario it was written for. "
+            "The city "
             "(Hosapura), its wards and the authority are fictional; ID numbers are placeholders.",
             "",
             "Files: `train.jsonl` (kept rows), `rejected.jsonl` (failed attempts), "
@@ -553,30 +674,154 @@ def dataset_card(model_name: str, summary: dict[str, Any]) -> str:
     )
 
 
+def write_jsonl(path: Path, rows: Rows) -> None:
+    lines = (json.dumps(row, ensure_ascii=False) for row in rows)
+    path.write_text("".join(f"{line}\n" for line in lines), "utf-8")
+
+
+def read_jsonl(path: Path) -> Rows:
+    return [json.loads(line) for line in path.read_text("utf-8").splitlines() if line.strip()]
+
+
 def write_output(
     out: Path,
     model_name: str,
-    accepted: list[dict[str, Any]],
-    rejected: list[dict[str, Any]],
+    accepted: Rows,
+    rejected: Rows,
     summary: dict[str, Any],
 ) -> None:
     out.mkdir(parents=True, exist_ok=True)
-    for name, rows in (("train.jsonl", accepted), ("rejected.jsonl", rejected)):
-        lines = (json.dumps(row, ensure_ascii=False) for row in rows)
-        (out / name).write_text("".join(f"{line}\n" for line in lines), "utf-8")
+    write_jsonl(out / "train.jsonl", accepted)
+    write_jsonl(out / "rejected.jsonl", rejected)
     (out / "report.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), "utf-8")
     (out / "README.md").write_text(dataset_card(model_name, summary), "utf-8")
 
 
-def push(out: Path, repo: str, message: str) -> None:
+TOKEN_HELP = (
+    "HF_TOKEN needs write access to {repo}: on huggingface.co, Settings → Access Tokens, "
+    "use a Write token, or a fine-grained token with write access to the repos of the "
+    "{namespace} organization."
+)
+
+
+@functools.cache
+def hub(repo: str) -> Any:
+    """A Hub client for `repo`, which is refused if public and created private if missing.
+
+    The repo is only created when it does not exist: creating needs the right to make repos
+    in the organization, which a token that can write to this one repo may not have.
+    """
     from huggingface_hub import HfApi
+    from huggingface_hub.errors import RepositoryNotFoundError
 
     api = HfApi(token=os.environ["HF_TOKEN"])
-    api.create_repo(repo, repo_type="dataset", private=True, exist_ok=True)
-    # create_repo leaves an existing repo as it is, so a public one would stay public.
-    if not api.repo_info(repo, repo_type="dataset").private:
+    try:
+        info = api.repo_info(repo, repo_type="dataset")
+    except RepositoryNotFoundError:
+        # Also what a private repo looks like to a token without access to it.
+        try:
+            api.create_repo(repo, repo_type="dataset", private=True)
+        except Exception as exc:
+            raise SystemExit(
+                f"HF_TOKEN cannot see {repo} and may not create it ({exc}). "
+                + TOKEN_HELP.format(repo=repo, namespace=repo.split("/")[0])
+            ) from exc
+        info = api.repo_info(repo, repo_type="dataset")
+    if not info.private:
         raise SystemExit(f"{repo} is public; make it private before uploading")
-    api.upload_folder(folder_path=out, repo_id=repo, repo_type="dataset", commit_message=message)
+    return api
+
+
+# Progress of an unfinished run, under out/ and (with --push-repo) in the dataset repo, so a
+# run cut off by Kaggle's 12-hour limit or a restart continues with --resume.
+CHECKPOINT = "checkpoint"
+
+
+def save_checkpoint(
+    out: Path,
+    run: dict[str, Any],
+    accepted: Rows,
+    rejected: Rows,
+    repo: str | None,
+    strict: bool = False,
+) -> None:
+    """Write the rows so far under out/ and, with `repo`, upload them.
+
+    The local copy always lands first. A failed upload stops the run only when `strict`
+    (the check before generation starts); mid-run it is reported and the run goes on, and
+    the next checkpoint tries again.
+    """
+    folder = out / CHECKPOINT
+    folder.mkdir(parents=True, exist_ok=True)
+    write_jsonl(folder / "train.jsonl", accepted)
+    write_jsonl(folder / "rejected.jsonl", rejected)
+    (folder / "run.json").write_text(json.dumps(run), "utf-8")
+    where = str(folder)
+    if repo:
+        try:
+            hub(repo).upload_folder(
+                folder_path=folder,
+                path_in_repo=CHECKPOINT,
+                repo_id=repo,
+                repo_type="dataset",
+                commit_message=f"checkpoint: {len(accepted)} rows kept",
+            )
+            where = f"{folder} and {repo}"
+        except Exception as exc:
+            help_text = TOKEN_HELP.format(repo=repo, namespace=repo.split("/")[0])
+            if strict:
+                raise SystemExit(f"Cannot upload to {repo}: {exc}\n{help_text}") from exc
+            print(f"WARNING: checkpoint upload failed ({exc}); kept in {folder}", flush=True)
+    print(f"checkpoint saved: {len(accepted)} kept ({where})", flush=True)
+
+
+def load_checkpoint(out: Path, run: dict[str, Any], repo: str | None) -> tuple[Rows, Rows]:
+    """The rows of an earlier run with the same settings: from out/, else from the repo."""
+    folder = out / CHECKPOINT
+    if not (folder / "run.json").exists() and repo:
+        from huggingface_hub import hf_hub_download
+
+        api = hub(repo)
+        if api.file_exists(repo, f"{CHECKPOINT}/run.json", repo_type="dataset"):
+            for name in ("run.json", "train.jsonl", "rejected.jsonl"):
+                hf_hub_download(
+                    repo,
+                    f"{CHECKPOINT}/{name}",
+                    repo_type="dataset",
+                    local_dir=out,
+                    token=os.environ["HF_TOKEN"],
+                )
+    if not (folder / "run.json").exists():
+        return [], []
+    saved = json.loads((folder / "run.json").read_text("utf-8"))
+    if saved != run:
+        raise SystemExit(
+            f"The checkpoint is from a different run ({saved}); "
+            "run with the same settings, or delete the checkpoint to start over."
+        )
+    return read_jsonl(folder / "train.jsonl"), read_jsonl(folder / "rejected.jsonl")
+
+
+def push(out: Path, repo: str, message: str) -> None:
+    api = hub(repo)
+    try:
+        api.upload_folder(
+            folder_path=out,
+            repo_id=repo,
+            repo_type="dataset",
+            commit_message=message,
+            ignore_patterns=[f"{CHECKPOINT}/*"],
+        )
+    except Exception as exc:
+        raise SystemExit(
+            f"The run finished but the upload to {repo} failed: {exc}\n"
+            f"Every file is in {out}; download them before the session ends, or fix the "
+            "token and run again with --resume to upload."
+        ) from exc
+    if api.file_exists(repo, f"{CHECKPOINT}/run.json", repo_type="dataset"):
+        api.delete_folder(
+            CHECKPOINT, repo_id=repo, repo_type="dataset", commit_message="run finished"
+        )
 
 
 def main() -> None:
@@ -591,6 +836,21 @@ def main() -> None:
     parser.add_argument("--four-bit", action="store_true", help="load in 4-bit (one T4)")
     parser.add_argument("--dry-run", action="store_true", help="print prompts, load no model")
     parser.add_argument("--push-repo", help="private HF dataset repo to upload to")
+    parser.add_argument(
+        "--no-meaning-check",
+        dest="meaning_check",
+        action="store_false",
+        help="keep sentences without asking the model which scenario they describe",
+    )
+    parser.add_argument(
+        "--resume", action="store_true", help="continue from a checkpoint of the same run"
+    )
+    parser.add_argument(
+        "--max-hours", type=float, help="save a checkpoint and stop after this long"
+    )
+    parser.add_argument(
+        "--checkpoint-every", type=int, default=10, help="batches between checkpoints"
+    )
     args = parser.parse_args()
 
     specs = sample_specs(args.n, args.seed)
@@ -601,7 +861,26 @@ def main() -> None:
             print(build_messages(spec, rng)[1]["content"], end="\n\n")
         return
 
-    accepted, rejected = generate(
+    # What makes two runs the same run: a checkpoint is only resumed under these settings.
+    run = {
+        "n": args.n,
+        "seed": args.seed,
+        "model": args.model,
+        "attempts": args.attempts,
+        "meaning_check": args.meaning_check,
+    }
+    previous = load_checkpoint(args.out, run, args.push_repo) if args.resume else ([], [])
+    if previous[0] or previous[1]:
+        print(f"resuming: {len(previous[0])} kept, {len(previous[1])} failed attempts", flush=True)
+
+    def checkpoint(accepted: Rows, rejected: Rows) -> None:
+        save_checkpoint(args.out, run, accepted, rejected, args.push_repo)
+
+    if args.push_repo:
+        # Prove the token can write before hours of generation depend on it.
+        save_checkpoint(args.out, run, *previous, args.push_repo, strict=True)
+
+    accepted, rejected, finished = generate(
         specs,
         args.model,
         args.batch_size,
@@ -609,8 +888,25 @@ def main() -> None:
         args.temperature,
         args.four_bit,
         args.seed,
+        args.meaning_check,
+        previous=previous,
+        checkpoint=checkpoint,
+        checkpoint_every=args.checkpoint_every,
+        deadline=time.monotonic() + args.max_hours * 3600 if args.max_hours else None,
     )
-    summary = {"model": args.model, "seed": args.seed, **report(specs, accepted, rejected)}
+    if not finished:
+        print(
+            f"Stopped at the {args.max_hours} h limit with {len(accepted)} kept. "
+            "Run again with --resume (and the same settings) to continue.",
+            flush=True,
+        )
+        return
+    summary = {
+        "model": args.model,
+        "seed": args.seed,
+        "meaning_check": args.meaning_check,
+        **report(specs, accepted, rejected),
+    }
     write_output(args.out, args.model, accepted, rejected, summary)
     print(json.dumps(summary, ensure_ascii=False, indent=1))
     if args.push_repo:
