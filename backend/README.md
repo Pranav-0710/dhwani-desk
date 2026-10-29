@@ -83,7 +83,15 @@ What the agent says comes from the state machine in `dialogue/machine.py`. It is
 
 A safety risk wins over everything. A risk outside the corporation's remit, such as chest pain or a fight, gets "call 112" and an officer, not a redirect.
 
-The lines are in `dialogue/templates/kn.yaml`. Until Laya is served (#15), the decisions come from keyword rules in `dialogue/standin.py`. Fixed lines are synthesised once per process and replayed from memory (`audio/tts_cache.py`).
+The lines are in `dialogue/templates/kn.yaml`. Fixed lines are synthesised once per process and replayed from memory (`audio/tts_cache.py`).
+
+`DECIDER` picks who decides. `keyword` (the default) uses the rules in `dialogue/standin.py`. `laya` uses Laya through `decisions/laya.py`, loaded once at startup from `LAYA_CHECKPOINT_REPO` at `LAYA_CHECKPOINT_REVISION`, and needs `uv sync --group laya`. Laya answers 8 of the decision schema's questions; code answers the ward and personal numbers (`decisions/extractors.py`).
+
+Each turn is decided in two steps, safety first:
+1. The four questions that can end the call at once: danger, how urgent (an emergency counts as danger), a request for a person, not a civic matter.
+2. The rest.
+
+If step 1 calls for a hand-off, the hand-off line is said at once, and step 2 still runs for the officer. Otherwise, if step 2 takes over 0.3 s, the agent says "ಸರಿ, ಒಂದು ಕ್ಷಣ" ("okay, one moment") while it runs. Timings: `docs/decisions/laya-latency.md`.
 
 Before the lines of each reply, the browser gets a `dialogue` message:
 - `keys`: the template keys, in speaking order
@@ -92,6 +100,7 @@ Before the lines of each reply, the browser gets a `dialogue` message:
 - `slots`: department, ward, and whether a location was given
 - `ticket`: when one was filed
 - `decision`: every answer behind the reply
+- `screening`: set instead of `decision` when the call was handed off after the safety step. Once the full decision is in, a second `dialogue` message follows with no `keys`, the `decision` and the updated `slots`; nothing more is said.
 
 Then, per agent line, in order:
 
@@ -105,3 +114,48 @@ When the agent closes the call (ticket filed or request redirected), the server 
 A Timbre failure sends `tts_error` (`message`) before `agent_audio_end`; the call continues. Every `agent_audio_start` is followed by an `agent_audio_end`, because the phone page mutes its mic in between. When the call ends (browser leaves, or Prisma closes or fails), a line being spoken is cut off and queued lines are dropped. `config` also carries `tts_sample_rate`.
 
 The phone page in `console/` is the browser side of this route. To try a call without a microphone, `uv run python -m scripts.call_smoke` phones the running server with synthetic caller speech and prints the transcripts, decisions and agent lines with timings.
+
+## Supervisor console (`/ws/console`, `/api/thresholds`)
+
+The console watches every live call and lets an officer step in (`dialogue/live.py`). It is off until `CONSOLE_TOKEN` is set, because it can speak to callers.
+
+1. The console's first message is `{"type": "hello", "token": "<CONSOLE_TOKEN>"}`, within 5 s. A wrong or missing token gets `error` and a close with 1008.
+2. It then gets `calls`: every live call (`call_id`, `started_at`, `state`, `reason`, `officer`, `slots`) and the escalation `thresholds` for the decision bars (also at `GET /api/thresholds`, from `decisions/thresholds.py`).
+3. As things happen: `call_started` (the same fields), `call_event` (`call_id`, and `event`: every JSON message that call's browser got, as listed above; no audio) and `call_closed` (`call_id`).
+
+Commands, each with a `call_id` and an optional `id` that is echoed back:
+
+| Command | Does | Allowed when |
+| --- | --- | --- |
+| `take_over` | The officer has the call; the agent stays quiet. A call the agent was still handling is handed off with reason `taken_over`. | the call is not closed |
+| `say` (`text`) | The agent's voice says the officer's text (up to 300 characters) | the officer has taken the call |
+| `hand_back` | The agent says "ಕಾಯ್ದಿದ್ದಕ್ಕೆ ಧನ್ಯವಾದ…" and decides on everything the caller said, including to the officer | the call is handed off |
+
+Each command is answered with `done` or `error` (`message`), plus `command`, `call_id` and `id`. A command the console stops waiting for (after 10 s, or because it disconnected) is cancelled and never carried out later, so an officer who tries again is not heard twice.
+
+After a hand-back, only what the caller says from then on can hand the call off again: danger, an emergency or a request for an officer, judged on those words alone. The officer has dealt with everything before, and the decider, rereading the whole call, would otherwise hand it straight back. Routing and the ticket still come from the whole call, so the ticket keeps an emergency's urgency. Caller turns said while the call is handed off are stored too, masked as if they held a personal number. `calls` and `call_started` also carry the caller's `turns` so far, for a console that joins mid-call.
+
+Every `dialogue` message carries `officer`: whether an officer has taken the call. A console that stops reading falls behind after 1000 messages and is cut off; it reconnects and starts again from `calls`.
+
+## Tickets (`tickets/`, `/api/tickets`)
+
+When the agent closes a call with a ticket, it is stored in SQLite (`DATABASE_URL`, default `backend/dhwani.db`, ignored by git). It uses Python's built-in `sqlite3`, so there is no extra dependency. The schema is in `tickets/store.py`, and it is a shared contract with the console (#18) and the eval harness (#19).
+
+| Field | Meaning |
+| --- | --- |
+| `number` | Ticket number read back to the caller, from 1001 |
+| `department`, `ward`, `urgency` | The routing decision. `ward` is a ward id or `unknown` |
+| `location_text` | The caller's own words for where the problem is (the turns that gave the place or named the ward), masked |
+| `repeat_complaint`, `status` | Repeat flag; `open` until someone closes it |
+| `decision`, `decider_revision` | Every answer behind the ticket with its probability, and which decider made it (`keyword-standin-1`, or `laya:<repo>@<commit>`) |
+| `call_id`, `created_at` | Links the ticket to its caller turns; UTC timestamp |
+
+Two rules protect callers:
+- **Masking:** caller turns are stored masked in `transcripts`. Before anything is written, every run of 10 or more digits (phone, Aadhaar, account) is replaced with X. When the decider thinks a personal ID was said, runs of 4 or more digits are masked too.
+- **Retention:** turns older than `TRANSCRIPT_RETENTION_DAYS` (default 7) are deleted at startup and every hour after. Tickets are kept.
+
+Read-only API for the console:
+- `GET /api/tickets?limit=50`: newest first, `limit` from 1 to 500.
+- `GET /api/tickets/{number}`: returns 404 when no such ticket exists.
+
+The console's Vite dev server proxies only `/ws` today, so `/api` needs adding there.

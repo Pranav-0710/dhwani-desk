@@ -7,8 +7,8 @@ Lakshmi Narasimman was away until 2026-10-16. In that time Jey Pranav also did t
 | Area | Jey Pranav | Lakshmi Narasimman |
 | --- | --- | --- |
 | Gnani integration | Prisma realtime STT client and proxy; Timbre TTS client and voice choice; browser call path | |
-| Dialogue and escalation | Dialogue state machine, Kannada reply templates, escalation order | |
-| Laya (benchmark, fine-tuning, serving) | Week-1 Kannada benchmark and go/no-go decision | |
+| Dialogue and escalation | Dialogue state machine, Kannada reply templates, escalation order; officer take-over and hand-back | |
+| Laya (benchmark, fine-tuning, serving) | Week-1 Kannada benchmark and go/no-go decision; ONNX serving in the call, safety-first decisions, latency report | |
 | Data and evaluation | Decision schema, fictional wards, seed set; synthetic data generator with consistency and meaning checks | |
 | Console and phone UI | Phone page: browser mic capture and agent playback; line noise toggle | |
 | Delivery (Docker, demo, posts, write-up) | Repo bootstrap, CI, PRD; Hugging Face organization and repos | |
@@ -28,4 +28,7 @@ Lakshmi Narasimman was away until 2026-10-16. In that time Jey Pranav also did t
 | 2026-10-13 | Jey Pranav | #36 | Hugging Face organization, private repos and token setup (#8) |
 | 2026-10-16 | Jey Pranav | #37 | Dialogue state machine with Kannada templates, escalation and hang-up (#9) |
 | 2026-10-16 | Jey Pranav | #39 | Two-person workflow: CODEOWNERS, required review, contributions backfill (#38) |
+| 2026-10-19 | Jey Pranav | #40 | Tickets: SQLite store, masking across turns, transcript retention, console API (#17) |
+| 2026-10-23 | Jey Pranav | #42 | Laya serving: ONNX decider, safety questions first, "one moment" line, latency report (#15) |
+| 2026-10-23 | Jey Pranav | #43 | Officer take-over: console socket, typed replies spoken by Timbre, hand-back, thresholds API (#16) |
 | 2026-10-24 | Jey Pranav | #44 | Line noise toggle on the phone page: pink noise at two levels, kept on while the caller is muted (#11) |
