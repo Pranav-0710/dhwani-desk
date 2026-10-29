@@ -1,7 +1,7 @@
 """A keyword stand-in for Laya, so the call works end to end before the fine-tuned checkpoint.
 
-#15 replaces it with Laya (plus code for ward and personal-ID detection, per
-docs/decisions/laya-kannada-gate.md). The keyword lists come from the week-1 benchmark's rules,
+It stays the default (`DECIDER=keyword`) until the fine-tuned Laya checkpoint is served with
+`DECIDER=laya` (decisions/laya.py). The keyword lists come from the week-1 benchmark's rules,
 which were written against the seed set: good enough to demo the call flow, not a measure of
 anything. A keyword hit answers with high confidence, no hit with low confidence, so the state
 machine asks or hands off exactly as it would for an unsure Laya.
@@ -11,7 +11,7 @@ import json
 import re
 
 from config import REPO_ROOT
-from dialogue.decision import Decision
+from dialogue.decision import Decision, Screening
 
 HIT, MISS = 0.9, 0.1
 
@@ -64,22 +64,30 @@ class KeywordDecider:
         }
         self._ward_by_number = {str(ward["number"]): ward["id"] for ward in wards}
 
-    def decide(self, transcript: str) -> Decision:
+    def screen(self, transcript: str) -> Screening:
+        return Screening(
+            safety_hazard=HIT if _has(transcript, HAZARD_WORDS) else MISS,
+            urgency=(
+                "emergency"
+                if _has(transcript, EMERGENCY_WORDS)
+                else "urgent"
+                if _has(transcript, URGENT_WORDS)
+                else "soon"
+            ),
+            wants_human=HIT if _has(transcript, HUMAN_WORDS) else MISS,
+            out_of_scope=HIT if _has(transcript, OUT_OF_SCOPE_WORDS) else MISS,
+        )
+
+    def decide(self, transcript: str, screening: Screening) -> Decision:
         text = transcript
         ward = self._ward(text)
-        out_of_scope = _has(text, OUT_OF_SCOPE_WORDS)
+        out_of_scope = screening.out_of_scope > 0.5
         department = next(
             (name for name, words in DEPARTMENT_WORDS.items() if _has(text, words)), None
         )
         if out_of_scope:
             department = "other"
-        urgency = (
-            "emergency"
-            if _has(text, EMERGENCY_WORDS)
-            else "urgent"
-            if _has(text, URGENT_WORDS)
-            else "soon"
-        )
+        urgency = screening.urgency
         caller_state = (
             "abusive"
             if _has(text, ABUSIVE_WORDS)
@@ -95,12 +103,12 @@ class KeywordDecider:
             department_confidence=HIT if department else MISS,
             ward=ward,
             urgency=urgency,
-            safety_hazard=HIT if _has(text, HAZARD_WORDS) else MISS,
+            safety_hazard=screening.safety_hazard,
             has_location=HIT if ward != "unknown" or _has(text, PLACE_WORDS) else MISS,
             repeat_complaint=HIT if _has(text, REPEAT_WORDS) else MISS,
-            wants_human=HIT if _has(text, HUMAN_WORDS) else MISS,
+            wants_human=screening.wants_human,
             caller_state=caller_state,
-            out_of_scope=HIT if out_of_scope else MISS,
+            out_of_scope=screening.out_of_scope,
             contains_personal_id=HIT if len(digits) >= 10 else MISS,
         )
 

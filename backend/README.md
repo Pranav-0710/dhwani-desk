@@ -83,7 +83,15 @@ What the agent says comes from the state machine in `dialogue/machine.py`. It is
 
 A safety risk wins over everything. A risk outside the corporation's remit, such as chest pain or a fight, gets "call 112" and an officer, not a redirect.
 
-The lines are in `dialogue/templates/kn.yaml`. Until Laya is served (#15), the decisions come from keyword rules in `dialogue/standin.py`. Fixed lines are synthesised once per process and replayed from memory (`audio/tts_cache.py`).
+The lines are in `dialogue/templates/kn.yaml`. Fixed lines are synthesised once per process and replayed from memory (`audio/tts_cache.py`).
+
+`DECIDER` picks who decides. `keyword` (the default) uses the rules in `dialogue/standin.py`. `laya` uses Laya through `decisions/laya.py`, loaded once at startup from `LAYA_CHECKPOINT_REPO` at `LAYA_CHECKPOINT_REVISION`, and needs `uv sync --group laya`. Laya answers 8 of the decision schema's questions; code answers the ward and personal numbers (`decisions/extractors.py`).
+
+Each turn is decided in two steps, safety first:
+1. The four questions that can end the call at once: danger, how urgent (an emergency counts as danger), a request for a person, not a civic matter.
+2. The rest.
+
+If step 1 calls for a hand-off, the hand-off line is said at once, and step 2 still runs for the officer. Otherwise, if step 2 takes over 0.3 s, the agent says "ಸರಿ, ಒಂದು ಕ್ಷಣ" ("okay, one moment") while it runs. Timings: `docs/decisions/laya-latency.md`.
 
 Before the lines of each reply, the browser gets a `dialogue` message:
 - `keys`: the template keys, in speaking order
@@ -92,6 +100,7 @@ Before the lines of each reply, the browser gets a `dialogue` message:
 - `slots`: department, ward, and whether a location was given
 - `ticket`: when one was filed
 - `decision`: every answer behind the reply
+- `screening`: set instead of `decision` when the call was handed off after the safety step. Once the full decision is in, a second `dialogue` message follows with no `keys`, the `decision` and the updated `slots`; nothing more is said.
 
 Then, per agent line, in order:
 
@@ -116,7 +125,7 @@ When the agent closes a call with a ticket, it is stored in SQLite (`DATABASE_UR
 | `department`, `ward`, `urgency` | The routing decision. `ward` is a ward id or `unknown` |
 | `location_text` | The caller's own words for where the problem is (the turns that gave the place or named the ward), masked |
 | `repeat_complaint`, `status` | Repeat flag; `open` until someone closes it |
-| `decision`, `decider_revision` | Every answer behind the ticket with its probability, and which decider made it (`keyword-standin-1` until Laya, #15) |
+| `decision`, `decider_revision` | Every answer behind the ticket with its probability, and which decider made it (`keyword-standin-1`, or `laya:<repo>@<commit>`) |
 | `call_id`, `created_at` | Links the ticket to its caller turns; UTC timestamp |
 
 Two rules protect callers:

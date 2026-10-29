@@ -6,7 +6,7 @@ import re
 import pytest
 from fakes import NOTHING, ROADS, ROADS_IN_W04, ScriptedDecider
 
-from dialogue.decision import Decision
+from dialogue.decision import Decision, Screening
 from dialogue.machine import (
     MAX_LOCATION_ASKS,
     MAX_UNROUTED_TURNS,
@@ -106,6 +106,74 @@ def test_a_caller_who_asks_for_a_person_is_handed_off() -> None:
     reply = call.turn("ಆಫೀಸರ್ ಜೊತೆ ಮಾತಾಡಬೇಕು")
     assert reply.keys == ("handoff_human",)
     assert (reply.state, reply.reason) == (State.HANDED_OFF, "wants_human")
+
+
+@pytest.mark.parametrize(
+    ("screening", "key", "reason"),
+    [
+        (
+            Screening(safety_hazard=0.8, urgency="soon", wants_human=0.1, out_of_scope=0.1),
+            "safety",
+            "safety",
+        ),
+        (
+            Screening(safety_hazard=0.8, urgency="soon", wants_human=0.1, out_of_scope=0.9),
+            "safety_redirect",
+            "safety",
+        ),
+        (
+            Screening(safety_hazard=0.1, urgency="soon", wants_human=0.8, out_of_scope=0.1),
+            "handoff_human",
+            "wants_human",
+        ),
+    ],
+)
+def test_the_safety_step_alone_can_hand_off(screening: Screening, key: str, reason: str) -> None:
+    call, _ = dialogue()
+    call.hear("...")
+    reply = call.screened(screening)
+    assert reply is not None and reply.keys == (key,)
+    assert (reply.state, reply.reason) == (State.HANDED_OFF, reason)
+    assert (reply.decision, reply.screening) == (None, screening)
+
+
+def test_an_emergency_outranks_a_request_for_an_officer_in_either_step() -> None:
+    # "My father has chest pain, connect me to an officer": the caller must still hear 112.
+    chest_pain = dataclasses.replace(
+        NOTHING, safety_hazard=0.5, urgency="emergency", wants_human=0.9, out_of_scope=0.9
+    )
+    call, decider = dialogue(chest_pain)
+    reply = call.turn("ಅಪ್ಪನಿಗೆ ಎದೆ ನೋವು, ಅಧಿಕಾರಿಗೆ ಕನೆಕ್ಟ್ ಮಾಡಿ")
+    assert (reply.keys, reply.reason) == (("safety_redirect",), "safety")
+    assert reply.screening is not None  # handed off on the safety step
+    assert Dialogue(TEMPLATES, decider, CountingDesk()).respond(chest_pain).keys == (
+        "safety_redirect",
+    )
+
+
+def test_not_a_civic_matter_waits_for_the_full_decision() -> None:
+    # A distressed caller with an out-of-scope problem is handed off, not redirected, and only
+    # the full decision knows how the caller is.
+    call, _ = dialogue()
+    call.hear("...")
+    assert (
+        call.screened(
+            Screening(safety_hazard=0.1, urgency="soon", wants_human=0.1, out_of_scope=0.9)
+        )
+        is None
+    )
+    assert call.state is State.LISTENING
+
+
+def test_a_failure_after_a_safety_hand_off_keeps_the_hand_off() -> None:
+    class FailsAfterScreening(ScriptedDecider):
+        def decide(self, transcript: str, screening: Screening) -> Decision:
+            raise RuntimeError("model crashed")
+
+    decider = FailsAfterScreening(dataclasses.replace(ROADS, safety_hazard=0.9))
+    call = Dialogue(TEMPLATES, decider, CountingDesk())
+    reply = call.turn("ಕಂಬದಿಂದ ವೈರ್ ಬಿದ್ದು ಸ್ಪಾರ್ಕ್ ಆಗ್ತಿದೆ")
+    assert (reply.keys, reply.reason) == (("safety",), "safety")
 
 
 @pytest.mark.parametrize("caller_state", ["distressed", "abusive"])

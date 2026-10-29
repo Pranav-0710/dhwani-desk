@@ -8,7 +8,10 @@ greet → listen → decide on everything the caller has said so far → one of:
 - read back the ticket number and close
 
 Escalation comes first, in the order of the PRD's table: a safety risk wins over everything,
-including "not a civic complaint", because a wrong redirect could leave someone hurt.
+including "not a civic complaint", because a wrong redirect could leave someone hurt. The two
+escalations that need nothing but the decider's first step (danger or an emergency, then a
+request for an officer) happen on that step alone (`screened`), before the rest of the decision
+is made.
 """
 
 import logging
@@ -18,7 +21,7 @@ from itertools import count
 from typing import Any, Protocol
 from uuid import uuid4
 
-from dialogue.decision import Decider, Decision
+from dialogue.decision import Decider, Decision, Screening
 from dialogue.templates import Templates
 from tickets.store import TicketRequest
 
@@ -71,6 +74,8 @@ class Reply:
     reason: str | None = None  # why the call was handed off or closed
     ticket: Ticket | None = None
     decision: Decision | None = None
+    # Set instead of `decision` when the call was handed off on the decider's first step.
+    screening: Screening | None = None
 
     def to_client(self, slots: Slots) -> dict[str, Any]:
         """The `dialogue` event the browser and console receive."""
@@ -82,6 +87,7 @@ class Reply:
             "slots": asdict(slots),
             "ticket": asdict(self.ticket) if self.ticket else None,
             "decision": asdict(self.decision) if self.decision else None,
+            "screening": asdict(self.screening) if self.screening else None,
         }
 
 
@@ -110,6 +116,7 @@ class Dialogue:
     desk: TicketDesk
     call_id: str = field(default_factory=lambda: uuid4().hex)
     state: State = State.LISTENING
+    reason: str | None = None  # why the call was handed off or closed
     slots: Slots = field(default_factory=Slots)
     turns: list[str] = field(default_factory=list)
     # The caller turns that gave the location, verbatim: what the field team reads.
@@ -123,16 +130,23 @@ class Dialogue:
         return self._reply(("greeting",))
 
     def turn(self, text: str) -> Reply:
-        """Hear and decide one caller turn in one step. The call route does the same in two
-        steps (`hear`, then `respond`) so the decision can run off the event loop."""
+        """Hear and answer one caller turn in one go. The call route takes the same steps
+        (`hear`, `screened`, `respond`) one at a time, so the decider runs off the event loop
+        and the caller hears something while the slow step runs."""
         transcript = self.hear(text)
         if transcript is None:
             return self._reply(())
+        handed_off = None
         try:
-            decision = self.decider.decide(transcript)
+            screening = self.decider.screen(transcript)
+            handed_off = self.screened(screening)
+            decision = self.decider.decide(transcript, screening)
         except Exception:
             logger.exception("The decider failed; handing the call to an officer")
-            return self.decider_failed()
+            return handed_off or self.decider_failed()
+        if handed_off is not None:
+            self.complete(decision)
+            return handed_off
         return self.respond(decision)
 
     def hear(self, text: str) -> str | None:
@@ -146,7 +160,32 @@ class Dialogue:
     def decider_failed(self) -> Reply:
         """Hand off rather than go quiet: the decider reads the whole call, so if it failed on
         this transcript it would most likely fail on every longer one too."""
+        if self.state is not State.LISTENING:
+            return self._reply(())  # already handed off on the safety step, or over
         return self._end(State.HANDED_OFF, ("handoff_unclear",), "decider_error", None)
+
+    def screened(self, screening: Screening) -> Reply | None:
+        """The hand-off the decider's first step already calls for, or None when the call needs
+        the full decision (`respond`). The same rules as `respond`, in the same order, so
+        deciding in one step or two never changes what the caller hears."""
+        if self.state is not State.LISTENING:
+            return self._reply(())
+        if screening.safety_hazard > SAFETY_HAZARD or screening.urgency == "emergency":
+            key = _safety_line(screening.out_of_scope)
+            return self._end(State.HANDED_OFF, (key,), "safety", screening=screening)
+        if screening.wants_human > WANTS_HUMAN:
+            return self._end(
+                State.HANDED_OFF, ("handoff_human",), "wants_human", screening=screening
+            )
+        return None
+
+    def complete(self, decision: Decision) -> Reply:
+        """The full decision after a hand-off on the safety step, so the officer who takes over
+        sees what is already known. Nothing is said: the reply has no lines."""
+        if self.state is not State.HANDED_OFF:
+            return self._reply(())
+        self._remember(decision)
+        return self._reply((), reason=self.reason, decision=decision)
 
     def respond(self, decision: Decision) -> Reply:
         """The agent's answer to a decision on everything the caller has said so far."""
@@ -156,9 +195,7 @@ class Dialogue:
         self._remember(decision)
 
         if decision.safety_hazard > SAFETY_HAZARD or decision.urgency == "emergency":
-            # A risk outside the corporation's remit (chest pain, a fight) still gets an
-            # officer, and the caller is told to call 112 at once.
-            key = "safety_redirect" if decision.out_of_scope > OUT_OF_SCOPE else "safety"
+            key = _safety_line(decision.out_of_scope)
             return self._end(State.HANDED_OFF, (key,), "safety", decision)
         if decision.wants_human > WANTS_HUMAN:
             return self._end(State.HANDED_OFF, ("handoff_human",), "wants_human", decision)
@@ -241,10 +278,15 @@ class Dialogue:
         return self._reply(keys, reason="ticket", ticket=ticket, decision=decision)
 
     def _end(
-        self, state: State, keys: tuple[str, ...], reason: str, decision: Decision | None
+        self,
+        state: State,
+        keys: tuple[str, ...],
+        reason: str,
+        decision: Decision | None = None,
+        screening: Screening | None = None,
     ) -> Reply:
-        self.state = state
-        return self._reply(keys, reason=reason, decision=decision)
+        self.state, self.reason = state, reason
+        return self._reply(keys, reason=reason, decision=decision, screening=screening)
 
     def _reply(
         self,
@@ -252,6 +294,7 @@ class Dialogue:
         reason: str | None = None,
         ticket: Ticket | None = None,
         decision: Decision | None = None,
+        screening: Screening | None = None,
     ) -> Reply:
         values = {}
         if ticket:
@@ -262,4 +305,10 @@ class Dialogue:
                 "ticket": " ".join(ticket.number),
             }
         lines = tuple(self.templates.line(key, **values) for key in keys)
-        return Reply(keys, lines, self.state, reason, ticket, decision)
+        return Reply(keys, lines, self.state, reason, ticket, decision, screening)
+
+
+def _safety_line(out_of_scope: float) -> str:
+    # A risk outside the corporation's remit (chest pain, a fight) still gets an officer, and
+    # the caller is told to call 112 at once.
+    return "safety_redirect" if out_of_scope > OUT_OF_SCOPE else "safety"
