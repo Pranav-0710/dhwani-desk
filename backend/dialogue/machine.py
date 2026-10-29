@@ -16,9 +16,11 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from itertools import count
 from typing import Any, Protocol
+from uuid import uuid4
 
 from dialogue.decision import Decider, Decision
 from dialogue.templates import Templates
+from tickets.store import TicketRequest
 
 logger = logging.getLogger("dhwani.dialogue")
 
@@ -84,16 +86,20 @@ class Reply:
 
 
 class TicketDesk(Protocol):
-    def next_number(self) -> str: ...
+    """Files a ticket and returns its number (tickets.store.TicketStore in the app)."""
+
+    def file(self, request: TicketRequest) -> str: ...
 
 
 class CountingDesk:
-    """Ticket numbers from a counter; #17 replaces it with the SQLite ticket store."""
+    """Numbers tickets from a counter and keeps them in memory; for tests and scripts."""
 
     def __init__(self, start: int = 1001) -> None:
         self._numbers = count(start)
+        self.filed: list[TicketRequest] = []
 
-    def next_number(self) -> str:
+    def file(self, request: TicketRequest) -> str:
+        self.filed.append(request)
         return str(next(self._numbers))
 
 
@@ -102,9 +108,12 @@ class Dialogue:
     templates: Templates
     decider: Decider
     desk: TicketDesk
+    call_id: str = field(default_factory=lambda: uuid4().hex)
     state: State = State.LISTENING
     slots: Slots = field(default_factory=Slots)
     turns: list[str] = field(default_factory=list)
+    # The caller turns that gave the location, verbatim: what the field team reads.
+    location_turns: list[str] = field(default_factory=list)
     _unrouted_turns: int = 0
     _location_asks: int = 0
     _ward_asked: bool = False
@@ -182,6 +191,13 @@ class Dialogue:
         # best one; slots are only ever filled, never emptied.
         if decision.department_confidence >= DEPARTMENT_CONFIDENCE:
             self.slots.department = decision.department
+        # A turn that first gives the location, or first names the ward, is kept verbatim.
+        new_place = not self.slots.location_given and (
+            decision.ward != "unknown" or decision.has_location > HAS_LOCATION
+        )
+        new_ward = self.slots.ward is None and decision.ward != "unknown"
+        if (new_place or new_ward) and self.turns:
+            self.location_turns.append(self.turns[-1])
         if decision.ward != "unknown":
             self.slots.ward = decision.ward
         if decision.ward != "unknown" or decision.has_location > HAS_LOCATION:
@@ -198,11 +214,21 @@ class Dialogue:
         department = self.slots.department
         assert department is not None
         repeat = decision.repeat_complaint > REPEAT_COMPLAINT
-        ticket = Ticket(
-            number=self.desk.next_number(),
+        request = TicketRequest(
+            call_id=self.call_id,
             department=department,
             ward=self.slots.ward or "unknown",
             urgency=decision.urgency,
+            repeat_complaint=repeat,
+            location_text=" ".join(self.location_turns),
+            decision=decision,
+            decider_revision=self.decider.revision,
+        )
+        ticket = Ticket(
+            number=self.desk.file(request),
+            department=request.department,
+            ward=request.ward,
+            urgency=request.urgency,
             repeat_complaint=repeat,
         )
         keys = (

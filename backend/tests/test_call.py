@@ -7,9 +7,9 @@ from fakes import ROADS_IN_W04, FakeStream, ScriptedBrowser, ScriptedDecider, us
 
 import app as app_module
 from audio.speaker import Speaker
-from dialogue.machine import CountingDesk
 from gnani.prisma import SttEvent
 from gnani.timbre import TimbreError
+from tickets.store import TicketStore
 
 
 class FakeTts:
@@ -136,7 +136,9 @@ def test_call_greets_on_connect_then_answers_the_callers_turn(
     assert tts.closed
 
 
-def test_a_whole_call_ends_with_a_ticket(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_whole_call_ends_with_a_ticket(
+    monkeypatch: pytest.MonkeyPatch, ticket_store: TicketStore
+) -> None:
     use_dialogue_fakes(monkeypatch, FakeTts(), ScriptedDecider(ROADS_IN_W04))
     browser = ScriptedBrowser([bytes(1024)], leave_when=ended_lines(3))
 
@@ -148,6 +150,12 @@ def test_a_whole_call_ends_with_a_ticket(monkeypatch: pytest.MonkeyPatch) -> Non
     # The agent hangs up once its last line has been heard.
     assert browser.sent[-1] == {"type": "call_ended", "reason": "ticket"}
     assert browser.closed_with == 1000
+    # The ticket and the caller's turn are stored, the number matches the one read back.
+    (ticket,) = ticket_store.tickets()
+    assert ticket["number"] == closing["ticket"]["number"]
+    assert (ticket["department"], ticket["ward"]) == ("roads", "w04")
+    assert ticket["decider_revision"] == "scripted"
+    assert ticket_store.transcript(ticket["call_id"]) == ["ರಸ್ತೆ"]
 
 
 def test_a_late_prisma_event_during_the_hang_up_is_not_sent(
@@ -180,19 +188,19 @@ def test_a_failing_decider_hands_the_call_off(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_a_decision_still_running_when_the_call_ends_files_nothing(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, ticket_store: TicketStore
 ) -> None:
     started, release = threading.Event(), threading.Event()
 
     class SlowDecider:
+        revision = "slow"
+
         def decide(self, transcript: str):
             started.set()
             release.wait(5)
             return ROADS_IN_W04
 
-    desk = CountingDesk(start=1)
     use_dialogue_fakes(monkeypatch, FakeTts(), SlowDecider())
-    monkeypatch.setattr(app_module, "TICKETS", desk)
     browser = ScriptedBrowser(
         [bytes(1024)],
         leave_when=lambda sent: started.is_set(),  # leave mid-decision
@@ -206,7 +214,7 @@ def test_a_decision_still_running_when_the_call_ends_files_nothing(
     asyncio.run(scenario())
 
     assert lines_of(browser.sent, "dialogue", "keys") == [["greeting"]]
-    assert desk.next_number() == "1"  # no ticket number was used up
+    assert ticket_store.tickets() == []  # no ticket was filed for a call that had ended
 
 
 def test_fixed_lines_are_synthesised_once_across_calls(monkeypatch: pytest.MonkeyPatch) -> None:

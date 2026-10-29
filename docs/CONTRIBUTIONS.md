@@ -28,3 +28,4 @@ Lakshmi Narasimman was away until 2026-10-16. In that time Jey Pranav also did t
 | 2026-10-13 | Jey Pranav | #36 | Hugging Face organization, private repos and token setup (#8) |
 | 2026-10-16 | Jey Pranav | #37 | Dialogue state machine with Kannada templates, escalation and hang-up (#9) |
 | 2026-10-16 | Jey Pranav | #39 | Two-person workflow: CODEOWNERS, required review, contributions backfill (#38) |
+| 2026-10-19 | Jey Pranav | #40 | Tickets: SQLite store, masking across turns, transcript retention, console API (#17) |

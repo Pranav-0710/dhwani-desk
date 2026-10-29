@@ -105,3 +105,26 @@ When the agent closes the call (ticket filed or request redirected), the server 
 A Timbre failure sends `tts_error` (`message`) before `agent_audio_end`; the call continues. Every `agent_audio_start` is followed by an `agent_audio_end`, because the phone page mutes its mic in between. When the call ends (browser leaves, or Prisma closes or fails), a line being spoken is cut off and queued lines are dropped. `config` also carries `tts_sample_rate`.
 
 The phone page in `console/` is the browser side of this route. To try a call without a microphone, `uv run python -m scripts.call_smoke` phones the running server with synthetic caller speech and prints the transcripts, decisions and agent lines with timings.
+
+## Tickets (`tickets/`, `/api/tickets`)
+
+When the agent closes a call with a ticket, it is stored in SQLite (`DATABASE_URL`, default `backend/dhwani.db`, ignored by git). It uses Python's built-in `sqlite3`, so there is no extra dependency. The schema is in `tickets/store.py`, and it is a shared contract with the console (#18) and the eval harness (#19).
+
+| Field | Meaning |
+| --- | --- |
+| `number` | Ticket number read back to the caller, from 1001 |
+| `department`, `ward`, `urgency` | The routing decision. `ward` is a ward id or `unknown` |
+| `location_text` | The caller's own words for where the problem is (the turns that gave the place or named the ward), masked |
+| `repeat_complaint`, `status` | Repeat flag; `open` until someone closes it |
+| `decision`, `decider_revision` | Every answer behind the ticket with its probability, and which decider made it (`keyword-standin-1` until Laya, #15) |
+| `call_id`, `created_at` | Links the ticket to its caller turns; UTC timestamp |
+
+Two rules protect callers:
+- **Masking:** caller turns are stored masked in `transcripts`. Before anything is written, every run of 10 or more digits (phone, Aadhaar, account) is replaced with X. When the decider thinks a personal ID was said, runs of 4 or more digits are masked too.
+- **Retention:** turns older than `TRANSCRIPT_RETENTION_DAYS` (default 7) are deleted at startup and every hour after. Tickets are kept.
+
+Read-only API for the console:
+- `GET /api/tickets?limit=50`: newest first, `limit` from 1 to 500.
+- `GET /api/tickets/{number}`: returns 404 when no such ticket exists.
+
+The console's Vite dev server proxies only `/ws` today, so `/api` needs adding there.

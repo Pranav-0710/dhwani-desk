@@ -41,4 +41,8 @@ class Decider(Protocol):
     still runs to completion, so keep it bounded (#15: cap the transcript length for Laya).
     """
 
+    # Which decider made a decision, stored with every ticket: a rule-set version, or a
+    # checkpoint repo and revision for Laya.
+    revision: str
+
     def decide(self, transcript: str) -> Decision: ...

@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     gnani_tts_sample_rate: int = 16000
     gnani_tts_speed: float = 1.0
 
+    # SQLite only; a relative path is relative to backend/.
+    database_url: str = "sqlite:///./dhwani.db"
+    transcript_retention_days: int = 7
+
     @field_validator("gnani_tts_voice", mode="before")
     @classmethod
     def _default_voice_when_blank(cls, value: object) -> object:
@@ -57,6 +61,25 @@ class Settings(BaseSettings):
         if value not in (8000, 16000):
             raise ValueError("GNANI_STT_SAMPLE_RATE must be 8000 or 16000")
         return value
+
+    @field_validator("database_url")
+    @classmethod
+    def _sqlite_only(cls, value: str) -> str:
+        if not value.startswith("sqlite:///"):
+            raise ValueError("DATABASE_URL must be a sqlite:/// URL")
+        return value
+
+    @field_validator("transcript_retention_days")
+    @classmethod
+    def _retention(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("TRANSCRIPT_RETENTION_DAYS must be at least 1")
+        return value
+
+    @property
+    def database_path(self) -> Path:
+        path = Path(self.database_url.removeprefix("sqlite:///"))
+        return path if path.is_absolute() else BACKEND_DIR / path
 
     @field_validator("gnani_stt_bias_score")
     @classmethod
