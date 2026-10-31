@@ -53,13 +53,13 @@ What the script does:
 
 - **Data:** `train.jsonl` from `Dhwanidesk/dhwani-desk-data` at the tag `--dataset-tag` (default `v1.0`; `--tag-dataset` makes it at the current head if missing).
 - **Questions:** each sentence is asked the eight questions the backend asks Laya, built from `data/decision_schema.json` exactly as `backend/decisions/schema.py` builds them. `ward` and `contains_personal_id` are decided in backend code, so they are not trained. Urgency is trained as its level index.
-- **Training:** `laya.train.finetune` from `convaiinnovations/laya-multilingual` at Laya 0.4.6's reviewed commit. Choice options are shuffled every epoch, so department is not learnt by position. Laya keeps 400 items aside to fit its calibration temperatures.
-- **Export:** the upstream exporter at the commit that exported the base (`docs/decisions/laya-latency.md`), with `--verify` against PyTorch.
+- **Training:** `laya.train.finetune` from `convaiinnovations/laya-multilingual` at Laya 0.4.6's reviewed commit. Choice options are shuffled every epoch, so department is not learnt by position. About 1,600 items are kept aside to fit its calibration temperatures (Laya's default is 400).
+- **Export:** the upstream exporter at the commit that exported the base (`docs/decisions/laya-latency.md`), then checked against PyTorch on the answers the backend reads (the exporter's own `--verify` tolerance is too tight for a fine-tuned head).
 - **Load check:** the exported graph is loaded with `ONNXAgent`, as the backend loads it, and scored on the 50-sentence seed set (`load_check.json`). A full run is published only if it gets at least half the departments right and does not give every sentence the same one; zero-shot gets 0.08 on this check.
 - **Publish:** `--push-tag kn-ft-v1` uploads to `Dhwanidesk/dhwani-desk-laya` in the layout the backend loads (`rl_agent_config.json`, `tokenizer/` and `encoder/` at the root, the graph in `onnx/`, plus `model.safetensors` and the run's reports) and tags the commit. A tag that exists is never overwritten, and a `--limit` run is never published.
 
-Before training, `--push-tag` checks that the token reaches the model repo and that the tag is free, so a bad token fails in seconds, not after the run. Calibration holds out about 1,600 items (Laya's default is 400).
+Before training, `--push-tag` checks that the token reaches the model repo and that the tag is free, so a bad token fails in seconds, not after the run.
 
 Known gap: the backend asks Laya about everything the caller has said so far, and training uses single sentences. A two-turn call (problem, then the place) is outside what the model has seen; the eval harness measures how much that costs.
 
-Then set `DECIDER=laya` and `LAYA_CHECKPOINT_REVISION=<tag>` in `.env`. Zero-shot against fine-tuned on the held-out test set is measured by the eval harness (`eval/`, #19), not here: Laya's own before/after uses its calibration slice, which comes from the training data.
+`.env.example` runs `kn-ft-v1` (`DECIDER=laya`, `LAYA_CHECKPOINT_REVISION=kn-ft-v1`); a new tag goes there once the eval harness has scored it. Zero-shot against fine-tuned on the held-out test set is measured by the eval harness (`eval/`, #19), not here: Laya's own before/after uses its calibration slice, which comes from the training data.
