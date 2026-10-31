@@ -165,8 +165,7 @@ def test_a_checkpoint_needs_a_repo() -> None:
 def test_a_hub_checkpoint_is_downloaded_as_real_files_named_by_its_commit(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    import huggingface_hub
-
+    huggingface_hub = pytest.importorskip("huggingface_hub")  # with `uv sync --group laya`
     from decisions import laya
 
     calls: dict[str, Any] = {}
