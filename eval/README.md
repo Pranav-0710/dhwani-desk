@@ -8,6 +8,7 @@ test set (#13). Everything runs from `backend/`, with its environment.
 | `run.py` | Runs each decider through `screen` then `decide`, as the call does, and writes `reports/<name>.md` and `.json` |
 | `build_test_set.py` | Applies the reader's corrections from the review sheet, checks the labels, writes `out/test.jsonl` and `data/test/manifest.json`; `--push` uploads the set |
 | `record.py` | Records the test sentences one at a time into `out/audio/<id>.wav` (16 kHz) |
+| `synthesize.py` | Speaks them with four Timbre voices instead, into the same files, when no reader is available |
 | `transcribe.py` | Streams each recording to Prisma in real time, clean at 16 kHz and at 8 kHz with phone-line noise; writes `out/transcripts.jsonl` |
 | `line_audio.py` | WAV reading and writing, 16 → 8 kHz downsampling, pink noise at the phone page's levels |
 
@@ -52,6 +53,12 @@ A department counts only when its confidence is high enough for the call to rout
    was recorded comes up again:
    ```bash
    uv run --with sounddevice python ../eval/record.py --test-file ../eval/out/test.jsonl
+   ```
+   Or speak them with Timbre (Kavin, Chitra, Lavanya and Kaveri in turn, at 0.9, 1.0 and 1.1
+   speed; never Saanvi, the agent's voice). Synthetic speech is cleaner than a caller's, so a
+   report on it measures the line and Prisma, not real callers, and says so:
+   ```bash
+   uv run python ../eval/synthesize.py --test-file ../eval/out/test.jsonl
    ```
 4. Transcribe it. This spends Prisma credits, about 150 clips × 2 × their length; a stopped run
    carries on where it left off, and a failed clip is tried again on the next run. `--only 16k`
