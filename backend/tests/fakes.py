@@ -10,8 +10,11 @@ from fastapi.testclient import TestClient
 
 import app as app_module
 from config import Settings
-from dialogue.decision import Decision
+from dialogue.decision import Decision, Screening
 from gnani.prisma import SttEvent
+
+# A page the default ALLOWED_ORIGINS lets open the call sockets: the Vite dev server.
+PHONE_ORIGIN = "http://localhost:5173"
 
 
 def isolated_settings(**overrides: object) -> Settings:
@@ -70,7 +73,7 @@ class FakeStream:
 def use_stream(monkeypatch: pytest.MonkeyPatch, stream: FakeStream) -> TestClient:
     monkeypatch.setattr(app_module, "get_settings", lambda: isolated_settings(gnani_api_key="t"))
     monkeypatch.setattr(app_module, "stt_stream_factory", lambda settings: stream)
-    return TestClient(app_module.app)
+    return TestClient(app_module.app, headers={"origin": PHONE_ORIGIN})
 
 
 class ScriptedBrowser:
@@ -81,14 +84,21 @@ class ScriptedBrowser:
     so these tests are deterministic.
     """
 
-    def __init__(self, frames: list[bytes | str], leave_when=lambda sent: True) -> None:
+    def __init__(
+        self,
+        frames: list[bytes | str],
+        leave_when=lambda sent: True,
+        origin: str | None = PHONE_ORIGIN,
+    ) -> None:
+        self.headers = {} if origin is None else {"origin": origin}
         self.frames = list(frames)
         self.leave_when = leave_when
         self.sent: list[dict | bytes] = []
         self.closed_with: int | None = None
+        self.accepted = False
 
     async def accept(self) -> None:
-        return None
+        self.accepted = True
 
     async def receive(self) -> dict:
         await asyncio.sleep(0.01)
@@ -146,15 +156,31 @@ ROADS_IN_W04 = dataclasses.replace(ROADS, ward="w04", has_location=0.9)
 
 class ScriptedDecider:
     """Returns the queued decisions in order (raising any queued exception) and records what
-    it was asked about."""
+    it was asked about. `screen` answers from the next decision; `decide` hands it over."""
+
+    revision = "scripted"
 
     def __init__(self, *decisions: Decision | Exception) -> None:
         self.decisions = list(decisions)
         self.transcripts: list[str] = []
+        self.decided: list[str] = []  # transcripts that got past the safety step
 
-    def decide(self, transcript: str) -> Decision:
+    def screen(self, transcript: str) -> Screening:
         self.transcripts.append(transcript)
-        decision = self.decisions.pop(0)
+        decision = self.decisions[0]
         if isinstance(decision, Exception):
+            self.decisions.pop(0)
             raise decision
+        return screening_of(decision)
+
+    def decide(self, transcript: str, screening: Screening) -> Decision:
+        self.decided.append(transcript)
+        decision = self.decisions.pop(0)
+        assert isinstance(decision, Decision) and screening == screening_of(decision)
         return decision
+
+
+def screening_of(decision: Decision) -> Screening:
+    return Screening(
+        decision.safety_hazard, decision.urgency, decision.wants_human, decision.out_of_scope
+    )

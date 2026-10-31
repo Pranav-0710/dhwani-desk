@@ -1,0 +1,35 @@
+# Dhwani Desk in two containers: `docker compose up --build`, then open http://localhost:8080
+# (the phone) and http://localhost:8080/supervisor (the console). See docs/runbook.md.
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        LAYA: ${LAYA:-0}
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # The page the browser opens; add the tunnel's https address here when sharing it.
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080}
+    volumes:
+      - tickets:/var/lib/dhwani
+    # Not published: only the console container reaches it, so one origin faces the world.
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  console:
+    build:
+      context: .
+      dockerfile: console/Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  tickets:

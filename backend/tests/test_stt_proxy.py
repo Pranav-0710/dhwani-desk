@@ -1,7 +1,14 @@
 import asyncio
 
 import pytest
-from fakes import FakeStream, ScriptedBrowser, isolated_settings, use_fakes, use_stream
+from fakes import (
+    PHONE_ORIGIN,
+    FakeStream,
+    ScriptedBrowser,
+    isolated_settings,
+    use_fakes,
+    use_stream,
+)
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
@@ -79,7 +86,7 @@ def test_proxy_reports_overflow(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_proxy_reports_missing_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(app_module, "get_settings", lambda: isolated_settings(gnani_api_key=""))
-    client = TestClient(app_module.app)
+    client = TestClient(app_module.app, headers={"origin": PHONE_ORIGIN})
 
     with client.websocket_connect("/ws/stt") as ws:
         message = ws.receive_json()

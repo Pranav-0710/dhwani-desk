@@ -6,11 +6,16 @@ from collections.abc import AsyncIterator
 import pytest
 
 from audio.tts_cache import AudioCache, CachedSpeech
+from dialogue.decision import Decision
 from dialogue.standin import KeywordDecider
 from dialogue.turns import TurnCollector
 from gnani.timbre import TimbreError
 
 DECIDER = KeywordDecider()
+
+
+def decide(text: str) -> Decision:
+    return DECIDER.decide(text, DECIDER.screen(text))
 
 
 @pytest.mark.parametrize(
@@ -23,23 +28,23 @@ DECIDER = KeywordDecider()
     ],
 )
 def test_keyword_stand_in_routes_plain_complaints(text: str, department: str, ward: str) -> None:
-    decision = DECIDER.decide(text)
+    decision = decide(text)
     assert (decision.department, decision.ward) == (department, ward)
     assert decision.department_confidence > 0.6 and decision.has_location > 0.5
 
 
 def test_keyword_stand_in_flags_escalations_and_stays_unsure_on_nothing() -> None:
-    assert DECIDER.decide("ಕಂಬದಿಂದ ವೈರ್ ಬಿದ್ದು ಸ್ಪಾರ್ಕ್ ಆಗ್ತಿದೆ").safety_hazard > 0.6
-    assert DECIDER.decide("ಕಂಬದಿಂದ ವೈರ್ ಬಿದ್ದು ಸ್ಪಾರ್ಕ್ ಆಗ್ತಿದೆ").urgency == "emergency"
-    assert DECIDER.decide("ಆಫೀಸರ್ ಜೊತೆ ಮಾತಾಡಬೇಕು").wants_human > 0.7
-    chest_pain = DECIDER.decide("ಅಪ್ಪನಿಗೆ ಎದೆ ನೋವು ಬರ್ತಿದೆ ಆಂಬುಲೆನ್ಸ್ ಬೇಕು")
+    assert decide("ಕಂಬದಿಂದ ವೈರ್ ಬಿದ್ದು ಸ್ಪಾರ್ಕ್ ಆಗ್ತಿದೆ").safety_hazard > 0.6
+    assert decide("ಕಂಬದಿಂದ ವೈರ್ ಬಿದ್ದು ಸ್ಪಾರ್ಕ್ ಆಗ್ತಿದೆ").urgency == "emergency"
+    assert decide("ಆಫೀಸರ್ ಜೊತೆ ಮಾತಾಡಬೇಕು").wants_human > 0.7
+    chest_pain = decide("ಅಪ್ಪನಿಗೆ ಎದೆ ನೋವು ಬರ್ತಿದೆ ಆಂಬುಲೆನ್ಸ್ ಬೇಕು")
     assert chest_pain.safety_hazard > 0.6 and chest_pain.out_of_scope > 0.7
-    redirect = DECIDER.decide("ಕರೆಂಟ್ ಬಿಲ್ ತುಂಬಾ ಜಾಸ್ತಿ ಬಂದಿದೆ")
+    redirect = decide("ಕರೆಂಟ್ ಬಿಲ್ ತುಂಬಾ ಜಾಸ್ತಿ ಬಂದಿದೆ")
     assert redirect.out_of_scope > 0.7 and redirect.department == "other"
-    nothing = DECIDER.decide("ಹಲೋ")
+    nothing = decide("ಹಲೋ")
     assert nothing.department_confidence < 0.6
     assert (nothing.ward, nothing.caller_state) == ("unknown", "calm")
-    assert DECIDER.decide("ನನ್ನ ನಂಬರ್ 1234567890").contains_personal_id > 0.5
+    assert decide("ನನ್ನ ನಂಬರ್ 1234567890").contains_personal_id > 0.5
 
 
 def collect_turns(segments: list[tuple[float, str]], pause_s: float = 0.05) -> list[str]:

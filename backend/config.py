@@ -32,6 +32,58 @@ class Settings(BaseSettings):
     gnani_tts_sample_rate: int = 16000
     gnani_tts_speed: float = 1.0
 
+    # SQLite only; a relative path is relative to backend/.
+    database_url: str = "sqlite:///./dhwani.db"
+    transcript_retention_days: int = 7
+
+    # Who decides on the caller's words: keyword rules, or Laya (decisions/laya.py).
+    decider: Literal["keyword", "laya"] = "keyword"
+    hf_token: SecretStr = SecretStr("")
+    # A Hugging Face repo, or a local directory with the same layout.
+    laya_checkpoint_repo: str = "Dhwanidesk/dhwani-desk-laya"
+    # A tag or commit of the repo; required unless the checkpoint is a local directory.
+    laya_checkpoint_revision: str = ""
+    laya_threads: int = 8
+
+    # Shared secret a supervisor console sends before it may watch or take over calls. Empty
+    # turns /ws/console off: it can speak to callers.
+    console_token: SecretStr = SecretStr("")
+
+    # Pages that may open the call sockets (/ws/stt, /ws/call), comma-separated, exactly as a
+    # browser sends them in its Origin header: scheme, host and port, no path. Browsers apply
+    # no CORS to WebSockets, so without this any open web page could stream on our Gnani key.
+    allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    # Browser sessions streaming to Prisma at once, across /ws/stt and /ws/call.
+    max_stt_sessions: int = 2
+
+    @field_validator("allowed_origins")
+    @classmethod
+    def _origins(cls, value: str) -> str:
+        origins = []
+        for entry in value.split(","):
+            # As browsers send it: lower case, and no port when it is the scheme's default.
+            origin = entry.strip().rstrip("/").lower()
+            if not origin:
+                continue
+            scheme, _, host = origin.partition("://")
+            if scheme not in ("http", "https") or not host or "/" in host:
+                raise ValueError(
+                    f"ALLOWED_ORIGINS: {entry.strip()!r} is not an origin like https://example.com"
+                )
+            origins.append(origin.removesuffix({"http": ":80", "https": ":443"}[scheme]))
+        return ",".join(origins)
+
+    @field_validator("max_stt_sessions")
+    @classmethod
+    def _sessions(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("MAX_STT_SESSIONS must be at least 1")
+        return value
+
+    @property
+    def origins(self) -> frozenset[str]:
+        return frozenset(self.allowed_origins.split(",")) - {""}
+
     @field_validator("gnani_tts_voice", mode="before")
     @classmethod
     def _default_voice_when_blank(cls, value: object) -> object:
@@ -57,6 +109,32 @@ class Settings(BaseSettings):
         if value not in (8000, 16000):
             raise ValueError("GNANI_STT_SAMPLE_RATE must be 8000 or 16000")
         return value
+
+    @field_validator("database_url")
+    @classmethod
+    def _sqlite_only(cls, value: str) -> str:
+        if not value.startswith("sqlite:///"):
+            raise ValueError("DATABASE_URL must be a sqlite:/// URL")
+        return value
+
+    @field_validator("transcript_retention_days")
+    @classmethod
+    def _retention(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("TRANSCRIPT_RETENTION_DAYS must be at least 1")
+        return value
+
+    @field_validator("laya_threads")
+    @classmethod
+    def _threads(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("LAYA_THREADS must be at least 1")
+        return value
+
+    @property
+    def database_path(self) -> Path:
+        path = Path(self.database_url.removeprefix("sqlite:///"))
+        return path if path.is_absolute() else BACKEND_DIR / path
 
     @field_validator("gnani_stt_bias_score")
     @classmethod
