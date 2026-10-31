@@ -15,6 +15,7 @@ import argparse
 import asyncio
 import contextlib
 import json
+import sys
 from pathlib import Path
 
 from common import OUT, read_jsonl
@@ -126,6 +127,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--only", choices=list(NAMES), help="one condition only")
     args = parser.parse_args()
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     asyncio.run(run(args.only))
 
 
