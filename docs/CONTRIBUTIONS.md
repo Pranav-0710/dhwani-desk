@@ -39,3 +39,4 @@ From 2026-10-28 Lakshmi Narasimman is away again, and Jey Pranav is doing the re
 | 2026-10-29 | Jey Pranav | #47 | Supervisor console: live calls, decision bars, take-over, tickets table (#18) |
 | 2026-10-29 | Jey Pranav | #48 | Docker Compose, nginx in front, tunnel runbook; console API needs the token (#21) |
 | 2026-10-29 | Jey Pranav | #49 | Eval harness: PRD metrics table, phone-line audio, test-set builder and recorder; seed-set comparison (#19) |
+| 2026-10-31 | Jey Pranav | #51 | Fine-tuned Laya on by default; Hub checkpoints load as real files ONNX Runtime accepts (#50) |

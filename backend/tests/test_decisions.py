@@ -154,3 +154,42 @@ def test_a_hub_checkpoint_must_be_pinned_to_a_tag_or_commit(revision: str) -> No
     settings = isolated_settings(decider="laya", laya_checkpoint_revision=revision)
     with pytest.raises(ValueError, match="LAYA_CHECKPOINT_REVISION"):
         LayaDecider.load(settings)
+
+
+def test_a_checkpoint_needs_a_repo() -> None:
+    settings = isolated_settings(decider="laya", laya_checkpoint_repo="")
+    with pytest.raises(ValueError, match="LAYA_CHECKPOINT_REPO"):
+        LayaDecider.load(settings)
+
+
+def test_a_hub_checkpoint_is_downloaded_as_real_files_named_by_its_commit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    huggingface_hub = pytest.importorskip("huggingface_hub")  # with `uv sync --group laya`
+    from decisions import laya
+
+    calls: dict[str, Any] = {}
+
+    class Api:
+        def __init__(self, token: str | None) -> None:
+            calls["token"] = token
+
+        def model_info(self, repo: str, revision: str) -> Any:
+            calls["asked"] = (repo, revision)
+            return type("Info", (), {"sha": "c0ffee"})()
+
+    def snapshot_download(repo: str, **kwargs: Any) -> str:
+        calls["download"] = (repo, kwargs)
+        return str(kwargs["local_dir"])
+
+    monkeypatch.setattr(huggingface_hub, "HfApi", Api)
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", snapshot_download)
+    monkeypatch.setattr(huggingface_hub.constants, "HF_HOME", str(tmp_path))
+
+    checkpoint = laya._download("Org/model", "kn-ft-v1", "t")
+
+    assert checkpoint == tmp_path / "laya-checkpoints" / "Org--model" / "c0ffee"
+    assert calls["asked"] == ("Org/model", "kn-ft-v1")
+    repo, kwargs = calls["download"]
+    # The commit, not the tag, so a moved tag cannot change what is in a commit's directory.
+    assert (repo, kwargs["revision"], kwargs["local_dir"]) == ("Org/model", "c0ffee", checkpoint)

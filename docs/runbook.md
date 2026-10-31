@@ -10,8 +10,7 @@ Copy `.env.example` to `.env` at the repo root and fill in:
 | --- | --- |
 | `GNANI_API_KEY` | every call (Prisma and Timbre) |
 | `CONSOLE_TOKEN` | the supervisor console and the tickets API; long and random, e.g. `python -c "import secrets; print(secrets.token_urlsafe(24))"` |
-| `DECIDER=laya`, `LAYA_CHECKPOINT_REVISION`, `HF_TOKEN` (read) | the fine-tuned Laya; leave `DECIDER=keyword` to run without it |
-| `LAYA=1` | builds the image with the Laya runtime (needed for `DECIDER=laya`) |
+| `HF_TOKEN` (read) | the fine-tuned Laya, which `.env.example` turns on (`DECIDER=laya`, `LAYA=1`, `LAYA_CHECKPOINT_REVISION=kn-ft-v1`); set `DECIDER=keyword` and `LAYA=0` to run without it |
 
 `.env` is never copied into an image: compose passes it to the backend when it starts.
 
@@ -22,7 +21,7 @@ docker compose up --build
 ```
 
 - Phone: http://localhost:8080. Press **Call** and speak Kannada. A browser only allows the microphone on `localhost` or `https`.
-- Console: http://localhost:8080/supervisor, with `CONSOLE_TOKEN` (the page arrives with #47, the supervisor console).
+- Console: http://localhost:8080/supervisor, with `CONSOLE_TOKEN`.
 - Logs: `docker compose logs -f backend`.
 - Stop: `docker compose down`. Tickets stay in the `tickets` volume. `docker compose down -v` deletes them.
 
