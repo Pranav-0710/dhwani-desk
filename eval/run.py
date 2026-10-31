@@ -351,6 +351,9 @@ def main() -> None:
         help="a Laya checkpoint: NAME=dir or NAME=repo@revision; repeatable",
     )
     parser.add_argument("--name", help="report file name (default: the set and today's date)")
+    parser.add_argument(
+        "--note", default="", help="added to the report's opening: how the audio was made"
+    )
     args = parser.parse_args()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -397,6 +400,7 @@ def main() -> None:
     results = evaluate(deciders, rows, transcripts)
     name = args.name or f"{args.set}-{datetime.now(UTC):%Y-%m-%d}"
     REPORTS.mkdir(parents=True, exist_ok=True)
+    note = f"{note} {args.note}".strip()
     text = report(results, "seed set" if args.set == "seed" else "held-out test set", note)
     (REPORTS / f"{name}.md").write_text(text, "utf-8")
     (REPORTS / f"{name}.json").write_text(
