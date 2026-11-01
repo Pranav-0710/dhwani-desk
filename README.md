@@ -34,8 +34,10 @@ Full design: [docs/PRD.md](docs/PRD.md).
 
 ## Team
 
-- Jey Pranav — voice pipeline and serving
-- Lakshmi Narasimman — data, fine-tuning, evaluation and console
+- Jey Pranav: voice pipeline, Laya serving, data, fine-tuning, evaluation, console and delivery
+- Lakshmi Narasimman: review and testing
+
+Who did what, by pull request: [docs/CONTRIBUTIONS.md](docs/CONTRIBUTIONS.md).
 
 ## Contributing
 
