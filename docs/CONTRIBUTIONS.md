@@ -49,3 +49,4 @@ From 2026-10-28 Lakshmi Narasimman is away again, and Jey Pranav is doing the re
 | 2026-11-01 | Jey Pranav | #60 | A call opens a new Prisma session when one drops mid-call, up to 3 times, without greeting again (#59) |
 | 2026-11-01 | Jey Pranav | #62 | Reconnect follow-up: one microphone per call, retry only recoverable Prisma failures, not after hang-up (#61) |
 | 2026-11-01 | Jey Pranav | #64 | Demo hardening: SQLite side files ignored, port 8080 on localhost only, console token at least 20 characters, rate limits on the token routes (#63) |
+| 2026-11-01 | Jey Pranav | #66 | A failed turn hands the call to an officer instead of going silent; barge-in no longer cuts the ticket number or safety advice (#65) |

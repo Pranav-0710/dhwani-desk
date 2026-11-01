@@ -32,6 +32,7 @@ type ServerMessage =
   | { type: 'tts_error'; message: string }
   | { type: 'closed'; reason: string }
   | { type: 'error'; message: string }
+  | { type: 'dialogue'; state: string }
 
 /** What the client needs from the audio player; PcmPlayer in the browser. */
 export interface Player {
@@ -84,6 +85,9 @@ export class CallClient {
   // Set once the mic is asked for: the server sends `connected` again when it replaces a dropped
   // Prisma session, and a second mic would send the caller's audio twice.
   private micRequested = false
+  // The caller may cut the agent off only while it is asking. Once the call is closed or
+  // handed off, the lines left (the ticket number, the safety advice) are played in full.
+  private bargeInAllowed = true
   private player: Player | null = null
   private agentSpeaking = false
   private mutedUntil = 0
@@ -144,6 +148,9 @@ export class CallClient {
         break
       case 'transcript':
         this.onEvent({ type: 'caller', text: message.text, latencyMs: message.latency_ms })
+        break
+      case 'dialogue':
+        this.bargeInAllowed = message.state === 'listening'
         break
       case 'agent_text':
         this.onEvent({ type: 'agent', text: message.text })
@@ -219,7 +226,7 @@ export class CallClient {
 
   /** Barge-in: the caller loud enough, for long enough, while the agent can be heard. */
   private hearCaller(rms: number): void {
-    if (!this.muted() || rms < BARGE_IN_RMS) {
+    if (!this.bargeInAllowed || !this.muted() || rms < BARGE_IN_RMS) {
       this.loudSince = null
       return
     }
