@@ -1,5 +1,6 @@
 import asyncio
 import dataclasses
+import sqlite3
 import threading
 import time
 from collections.abc import AsyncIterator
@@ -292,6 +293,44 @@ def test_a_whole_call_ends_with_a_ticket(
     assert (ticket["department"], ticket["ward"]) == ("roads", "w04")
     assert ticket["decider_revision"] == "scripted"
     assert ticket_store.transcript(ticket["call_id"]) == ["ರಸ್ತೆ"]
+
+
+def test_the_ticket_number_is_not_cut_off_by_a_barge_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    class SlowTts(FakeTts):
+        async def stream(self, text: str, voice: str | None = None) -> AsyncIterator[bytes]:
+            self.spoken.append(text)
+            for _ in range(10):
+                await asyncio.sleep(0.05)
+                yield b"\x01\x00"
+
+    use_dialogue_fakes(monkeypatch, SlowTts(), ScriptedDecider(ROADS_IN_W04))
+    # The caller's turn, then a pause (ignored text frames), then a barge-in while the ticket
+    # number is being read back.
+    browser = ScriptedBrowser(
+        [bytes(1024)] + ["wait"] * 30 + ["barge_in"], leave_when=lambda sent: False
+    )
+
+    asyncio.run(app_module.call(browser))
+
+    assert {"type": "agent_audio_end", "interrupted": True} not in browser.sent
+    assert lines_of(browser.sent, "agent_text", "text")[-1] == app_module.TEMPLATES.lines["closing"]
+    assert browser.sent[-1] == {"type": "call_ended", "reason": "ticket"}
+
+
+def test_a_failed_ticket_write_hands_the_call_off(
+    monkeypatch: pytest.MonkeyPatch, ticket_store: TicketStore
+) -> None:
+    use_dialogue_fakes(monkeypatch, FakeTts())
+
+    def locked(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(ticket_store, "record_turn", locked)
+    browser = ScriptedBrowser([bytes(1024)], leave_when=ended_lines(2))
+
+    asyncio.run(app_module.call(browser))
+
+    assert lines_of(browser.sent, "dialogue", "keys")[-1] == ["handoff_unclear"]
 
 
 def test_a_late_prisma_event_during_the_hang_up_is_not_sent(

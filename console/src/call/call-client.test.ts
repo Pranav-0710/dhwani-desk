@@ -249,6 +249,17 @@ describe('CallClient', () => {
       expect(Array.from(new Int16Array(call.socket.sent.at(-1)!))).toEqual([5, 6])
     })
 
+    it('lets the ticket number and safety advice play once the call is closed or handed off', async () => {
+      for (const state of ['closed', 'handed_off']) {
+        const call = await agentSpeaking()
+        call.socket.serverSends({ type: 'dialogue', state })
+        for (let i = 0; i < 10; i++) call.level(BARGE_IN_RMS * 2)
+
+        expect(call.player.stops).toBe(0)
+        expect(call.socket.texts).toEqual([])
+      }
+    })
+
     it("drops the cut line's late audio and does not mute the caller for its tail", async () => {
       const call = await agentSpeaking()
       for (let i = 0; i < 6; i++) call.level(1)

@@ -535,23 +535,39 @@ async def _converse(
             while True:
                 await work.put(await source.get())
 
+        async def answer_one(item: str | OfficerCommand) -> None:
+            if isinstance(item, OfficerCommand):
+                await obey(item)
+                return
+            turns_before = len(dialogue.turns)
+            if dialogue.hear(item) is not None:
+                if acknowledge_turns:
+                    speaker.say(TEMPLATES.line("ack"))
+                await decide(new_turn=True)
+            elif len(dialogue.turns) > turns_before:
+                # Said while the call was handed off: kept, and masked as if it held a
+                # personal number, since nothing decides on it now.
+                await record_turn(1.0)
+
         async def answer_turns() -> None:
             # Only the decider runs in threads (it may be slow); the dialogue changes here, on
             # the event loop, so a call that ends while a decision is running files nothing.
             while True:
                 item = await work.get()
-                if isinstance(item, OfficerCommand):
-                    await obey(item)
-                    continue
-                turns_before = len(dialogue.turns)
-                if dialogue.hear(item) is not None:
-                    if acknowledge_turns:
-                        speaker.say(TEMPLATES.line("ack"))
-                    await decide(new_turn=True)
-                elif len(dialogue.turns) > turns_before:
-                    # Said while the call was handed off: kept, and masked as if it held a
-                    # personal number, since nothing decides on it now.
-                    await record_turn(1.0)
+                try:
+                    await answer_one(item)
+                except Exception:
+                    # A failed store or ticket write must not leave the caller in silence with
+                    # this task gone: log it and hand the call to an officer.
+                    logger.exception("Answering a caller turn failed; handing off")
+                    with contextlib.suppress(Exception):
+                        await answer(dialogue.decider_failed())
+
+        def barge_in() -> None:
+            # Only while the agent is asking: once the call is closed or handed off, the lines
+            # left (the ticket number, the safety advice) must be heard in full.
+            if dialogue.state is State.LISTENING:
+                speaker.interrupt()
 
         greeted: list[bool] = []
 
@@ -579,7 +595,7 @@ async def _converse(
                     config,
                     converse,
                     stop=agent_hung_up,
-                    on_barge_in=speaker.interrupt,
+                    on_barge_in=barge_in,
                     failures=failures,
                 )
                 # Retry only what a new session can fix: Prisma closing on its own, or a failed
