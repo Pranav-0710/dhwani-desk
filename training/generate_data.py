@@ -55,7 +55,7 @@ DEPARTMENT_WEIGHTS = {
 OUT_OF_SCOPE_SHARE = 0.6  # of department "other"
 P_WARD, P_GENERIC_PLACE = 0.40, 0.20  # the rest give no location
 WARD_FORM_WEIGHTS = {"name": 0.45, "landmark": 0.30, "number": 0.25}
-P_REPEAT, P_WANTS_HUMAN, P_PERSONAL_ID = 0.15, 0.08, 0.06
+P_REPEAT, P_WANTS_HUMAN, P_PERSONAL_ID = 0.25, 0.20, 0.06
 
 MIN_WORDS, MAX_WORDS = 3, 40
 MAX_NEW_TOKENS = 512  # Kannada costs several tokens per word; the reply also carries the gloss
@@ -178,7 +178,10 @@ def build_messages(spec: dict[str, Any], rng: random.Random) -> list[dict[str, s
         "- Say that you already complained before and nothing happened."
         if labels["repeat_complaint"]
         else "- Do not say that you complained before.",
-        "- Ask to speak to an officer, a real person, not the automated system."
+        "- Say clearly, in your own words, that you want to speak to an officer or a real "
+        "person and not this machine, for example ಆಫೀಸರ್ ಜೊತೆ ಮಾತಾಡ್ಬೇಕು, ಯಾರಾದ್ರೂ ಮನುಷ್ಯರು "
+        "ಮಾತಾಡಿ, ಮೆಷಿನ್ ಬೇಡ, ಮೇಲಧಿಕಾರಿಯನ್ನ ಕೊಡಿ. Make it a request for a person, not only a "
+        "complaint."
         if labels["wants_human"]
         else "- Do not ask for an officer or a person.",
     ]

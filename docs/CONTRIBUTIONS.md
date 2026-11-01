@@ -11,7 +11,7 @@ From 2026-10-28 Lakshmi Narasimman is away again, and Jey Pranav is doing the re
 | Gnani integration | Prisma realtime STT client and proxy; Timbre TTS client and voice choice; browser call path | |
 | Dialogue and escalation | Dialogue state machine, Kannada reply templates, escalation order; officer take-over and hand-back; barge-in | |
 | Laya (benchmark, fine-tuning, serving) | Week-1 Kannada benchmark and go/no-go decision; ONNX serving in the call, safety-first decisions, latency report; fine-tuning run and checkpoint publishing | |
-| Data and evaluation | Decision schema, fictional wards, seed set; synthetic data generator with consistency and meaning checks; eval harness and seed-set comparison | |
+| Data and evaluation | Decision schema, fictional wards, seed set; synthetic data generator with consistency and meaning checks; eval harness and seed-set comparison | Generator changes for the second fine-tune (#67): fewer hazard scenarios, more officer requests |
 | Console and phone UI | Phone page: browser mic capture and agent playback; line noise toggle; supervisor console | |
 | Delivery (Docker, demo, posts, write-up) | Repo bootstrap, CI, PRD; Hugging Face organization and repos; call sockets locked down for the tunnel; Docker Compose and tunnel runbook | |
 
@@ -50,3 +50,4 @@ From 2026-10-28 Lakshmi Narasimman is away again, and Jey Pranav is doing the re
 | 2026-11-01 | Jey Pranav | #62 | Reconnect follow-up: one microphone per call, retry only recoverable Prisma failures, not after hang-up (#61) |
 | 2026-11-01 | Jey Pranav | #64 | Demo hardening: SQLite side files ignored, port 8080 on localhost only, console token at least 20 characters, rate limits on the token routes (#63) |
 | 2026-11-01 | Jey Pranav | #66 | A failed turn hands the call to an officer instead of going silent; barge-in no longer cuts the ticket number or safety advice (#65) |
+| 2026-11-01 | Lakshmi Narasimman | pending | Second fine-tune (#67), data side: non-hazard drainage and road scenarios (hazards now 4 of 12 and 3 of 10), officer requests raised to 20% of rows and repeat complaints to 25%, explicit officer-request wording in the generation prompt. Kaggle run and `kn-ft-v2` checkpoint still to do |

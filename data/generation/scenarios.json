@@ -89,6 +89,26 @@
     "en": "bad smell from the drain in front of the house, otherwise flowing",
     "urgency": "routine",
     "safety_hazard": false
+   },
+   {
+    "en": "the drain beside the street is blocked with plastic and silt and the water moves very slowly, with a bad smell",
+    "urgency": "soon",
+    "safety_hazard": false
+   },
+   {
+    "en": "used water on the street takes hours to drain away, though no blockage is visible",
+    "urgency": "routine",
+    "safety_hazard": false
+   },
+   {
+    "en": "the caller asks when the drain in their lane will be desilted",
+    "urgency": "routine",
+    "safety_hazard": false
+   },
+   {
+    "en": "silt and mud taken out of the drain a week ago is still lying beside it",
+    "urgency": "soon",
+    "safety_hazard": false
    }
   ],
   "solid-waste": [
@@ -172,6 +192,16 @@
    {
     "en": "the caller asks when the road in their area will be asphalted",
     "urgency": "routine",
+    "safety_hazard": false
+   },
+   {
+    "en": "small cracks have appeared along the edge of the road",
+    "urgency": "routine",
+    "safety_hazard": false
+   },
+   {
+    "en": "a pothole on the road makes vehicles slow down and traffic crawl, but nobody has been hurt",
+    "urgency": "soon",
     "safety_hazard": false
    }
   ],
