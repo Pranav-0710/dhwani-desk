@@ -15,6 +15,9 @@ export type StartMic = (
   onPcm: (pcm: Int16Array<ArrayBuffer>) => void,
   /** Asked per batch: true while the caller's own sound must not be sent. */
   muted: () => boolean,
+  /** The caller's own level (RMS) per batch, muted or not, so speech over the agent can be
+   * noticed (barge-in). */
+  onLevel?: (rms: number) => void,
 ) => Promise<Mic>
 
 /**
@@ -37,7 +40,7 @@ export function lineBatch(
  * speakers is mostly removed before it reaches speech recognition. If any setup step
  * fails, everything already acquired is released before the error is rethrown.
  */
-export const startMic: StartMic = async (targetRate, onPcm, muted) => {
+export const startMic: StartMic = async (targetRate, onPcm, muted, onLevel) => {
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   })
@@ -61,7 +64,9 @@ export const startMic: StartMic = async (targetRate, onPcm, muted) => {
     capture.port.onmessage = (event: MessageEvent<Float32Array>) => {
       pending.push(...downsampler.process(event.data))
       if (pending.length >= batchSize) {
-        onPcm(lineBatch(Float32Array.from(pending), muted(), noise))
+        const batch = Float32Array.from(pending)
+        onLevel?.(rmsOf(batch))
+        onPcm(lineBatch(batch, muted(), noise))
         pending = []
       }
     }
@@ -81,4 +86,10 @@ export const startMic: StartMic = async (targetRate, onPcm, muted) => {
     await release()
     throw error
   }
+}
+
+export function rmsOf(samples: Float32Array): number {
+  let sum = 0
+  for (const sample of samples) sum += sample * sample
+  return samples.length ? Math.sqrt(sum / samples.length) : 0
 }

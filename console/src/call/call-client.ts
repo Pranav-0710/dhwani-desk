@@ -4,6 +4,12 @@ import { PcmPlayer } from '../audio/player'
 
 /** Keep the mic muted this long after the agent's audio ends, so its tail isn't re-heard. */
 const ECHO_TAIL_S = 0.3
+/** Barge-in: the caller's own level (after the browser's echo cancellation) must stay at or
+ * above this for BARGE_IN_MS while the agent is audible. Loud enough that leftover echo of the
+ * agent does not count; short enough that playback stops within 300 ms of the caller starting
+ * (#10). */
+export const BARGE_IN_RMS = 0.04
+export const BARGE_IN_MS = 160
 /** WebSocket.OPEN, spelled out so the call logic runs without a browser. */
 const SOCKET_OPEN = 1
 
@@ -22,7 +28,7 @@ type ServerMessage =
   | { type: 'transcript'; text: string; latency_ms: number | null }
   | { type: 'agent_text'; text: string }
   | { type: 'agent_audio_start'; sample_rate: number }
-  | { type: 'agent_audio_end' }
+  | { type: 'agent_audio_end'; interrupted?: boolean }
   | { type: 'tts_error'; message: string }
   | { type: 'closed'; reason: string }
   | { type: 'error'; message: string }
@@ -32,6 +38,8 @@ export interface Player {
   start(sampleRate: number): void
   push(pcm: ArrayBuffer): void
   remaining(): number
+  /** Stop everything queued, at once. */
+  stop(): void
   close(): Promise<void>
 }
 
@@ -42,7 +50,7 @@ export interface CallSocket {
   onmessage: ((message: { data: unknown }) => void) | null
   onclose: (() => void) | null
   onerror: (() => void) | null
-  send(data: ArrayBuffer): void
+  send(data: ArrayBuffer | string): void
   close(code?: number): void
 }
 
@@ -63,10 +71,12 @@ const browserDeps: CallDeps = {
 /**
  * One phone call over `/ws/call`: mic audio up, transcripts and agent speech down.
  *
- * Half duplex for now: while the agent is speaking (until its audio has actually played,
- * plus a short tail) the mic sends no caller sound, only any line noise, so the bot never
- * answers its own voice while Prisma still gets a continuous real-time stream. Barge-in
- * (#10) replaces this. A CallClient is single-use: create a new one per call.
+ * While the agent is speaking (until its audio has actually played, plus a short tail) the
+ * mic sends no caller sound, only any line noise, so the bot never answers its own voice while
+ * Prisma still gets a continuous real-time stream. If the caller talks over the agent anyway
+ * (barge-in, #10), playback stops at once, the mic opens and the server is told, so it stops
+ * the line and treats what the caller says as a new turn. A CallClient is single-use: create a
+ * new one per call.
  */
 export class CallClient {
   private socket: CallSocket | null = null
@@ -74,6 +84,10 @@ export class CallClient {
   private player: Player | null = null
   private agentSpeaking = false
   private mutedUntil = 0
+  /** Since when the caller has been loud over the agent; null while not. */
+  private loudSince: number | null = null
+  /** The current line was cut: drop its audio still in flight, and its end. */
+  private interrupted = false
   private listeningTimer: ReturnType<typeof setTimeout> | null = null
   private micRate = 8000
   private noise: NoiseLevel = 'off'
@@ -95,7 +109,7 @@ export class CallClient {
     socket.onmessage = (message) => {
       if (typeof message.data === 'string') {
         void this.handle(JSON.parse(message.data) as ServerMessage)
-      } else {
+      } else if (!this.interrupted) {
         this.player?.push(message.data as ArrayBuffer)
       }
     }
@@ -130,13 +144,16 @@ export class CallClient {
         this.onEvent({ type: 'agent', text: message.text })
         break
       case 'agent_audio_start':
+        this.interrupted = false
+        this.loudSince = null
         this.agentSpeaking = true
         this.clearListeningTimer()
         this.player?.start(message.sample_rate)
         this.emitStatus('agent-speaking')
         break
       case 'agent_audio_end':
-        this.onAgentAudioEnd()
+        // After a barge-in the caller is talking: do not mute them for the cut line's tail.
+        if (!this.interrupted) this.onAgentAudioEnd()
         break
       case 'tts_error':
         this.onEvent({ type: 'error', message: `Agent voice failed: ${message.message}` })
@@ -172,6 +189,7 @@ export class CallClient {
         this.micRate,
         (pcm) => this.sendMic(pcm),
         () => this.muted(),
+        (rms) => this.hearCaller(rms),
       )
     } catch (error) {
       this.onEvent({ type: 'error', message: `Microphone unavailable: ${String(error)}` })
@@ -192,6 +210,28 @@ export class CallClient {
    * (only any line noise), so the agent never answers its own voice. */
   private muted(): boolean {
     return this.agentSpeaking || this.deps.now() < this.mutedUntil
+  }
+
+  /** Barge-in: the caller loud enough, for long enough, while the agent can be heard. */
+  private hearCaller(rms: number): void {
+    if (!this.muted() || rms < BARGE_IN_RMS) {
+      this.loudSince = null
+      return
+    }
+    const now = this.deps.now()
+    this.loudSince ??= now
+    if (now - this.loudSince >= BARGE_IN_MS) this.bargeIn()
+  }
+
+  private bargeIn(): void {
+    this.loudSince = null
+    this.interrupted = true
+    this.agentSpeaking = false
+    this.mutedUntil = 0
+    this.player?.stop()
+    this.clearListeningTimer()
+    if (this.socket?.readyState === SOCKET_OPEN) this.socket.send('barge_in')
+    this.emitStatus('listening')
   }
 
   private sendMic(pcm: Int16Array<ArrayBuffer>): void {

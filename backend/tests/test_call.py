@@ -100,6 +100,67 @@ def test_speaker_close_stops_mid_line_without_sending_more() -> None:
     assert {"type": "agent_audio_end"} not in outbox.sent
 
 
+def test_a_barge_in_cuts_the_line_drops_the_queue_and_the_speaker_carries_on() -> None:
+    outbox = RecordingOutbox()
+
+    class SlowTts(FakeTts):
+        async def stream(self, text: str, voice: str | None = None) -> AsyncIterator[bytes]:
+            self.spoken.append(text)
+            yield b"\x01\x00"
+            if text == "long":
+                await asyncio.sleep(3600)
+                yield b"never"
+
+    tts = SlowTts()
+
+    async def scenario() -> None:
+        speaker = Speaker(tts, outbox, sample_rate=8000)
+        speaker.say("long")
+        speaker.say("queued")
+        await wait_for(lambda: b"\x01\x00" in outbox.sent)
+        speaker.interrupt()
+        await wait_for(lambda: {"type": "agent_audio_end", "interrupted": True} in outbox.sent)
+        # The caller's next turn gets its answer as usual.
+        speaker.say("next")
+        await asyncio.wait_for(speaker.wait_until_heard(), 5)
+        await speaker.aclose()
+
+    asyncio.run(scenario())
+
+    assert tts.spoken == ["long", "next"]
+    assert outbox.sent == [
+        {"type": "agent_text", "text": "long"},
+        {"type": "agent_audio_start", "sample_rate": 8000},
+        b"\x01\x00",
+        {"type": "agent_audio_end", "interrupted": True},
+        {"type": "agent_text", "text": "next"},
+        {"type": "agent_audio_start", "sample_rate": 8000},
+        b"\x01\x00",
+        {"type": "agent_audio_end"},
+    ]
+
+
+def test_a_barge_in_from_the_browser_cuts_the_greeting(monkeypatch: pytest.MonkeyPatch) -> None:
+    class SlowTts(FakeTts):
+        async def stream(self, text: str, voice: str | None = None) -> AsyncIterator[bytes]:
+            yield b"\x01\x00"
+            await asyncio.sleep(3600)
+            yield b"never"
+
+    use_dialogue_fakes(monkeypatch, SlowTts())
+    interrupted = {"type": "agent_audio_end", "interrupted": True}
+    # A little audio first, so the greeting is being said when the caller cuts in.
+    browser = ScriptedBrowser(
+        [bytes(1024)] * 5 + ["barge_in"], leave_when=lambda sent: interrupted in sent
+    )
+
+    asyncio.run(app_module.call(browser))
+
+    # Greeting and the question after it are both queued at once; the cut drops the second.
+    assert lines_of(browser.sent, "agent_text", "text") == [app_module.TEMPLATES.lines["greeting"]]
+    assert interrupted in browser.sent
+
+
 def lines_of(sent: list[dict | bytes], kind: str, field: str) -> list:
     return [m[field] for m in sent if isinstance(m, dict) and m["type"] == kind]
 

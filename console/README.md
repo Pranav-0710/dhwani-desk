@@ -27,7 +27,7 @@ npm run build
 - `src/audio/mic.ts` — captures the mic (echo cancellation on), low-pass filters and downsamples to the backend's rate (8 kHz), mixes in any line noise and sends 16-bit PCM in ~40 ms batches.
 - `src/audio/noise.ts` — the **Line noise** toggle: pink background noise at about −34 dBFS ("Quiet street") or −24 dBFS ("Busy street"). It is added after the browser's own noise suppression, so speech recognition hears all of it, and can be changed during a call.
 - `src/audio/player.ts` — plays the agent's streamed PCM gap-free.
-- `src/call/call-client.ts` — one call over `/ws/call`. Half duplex for now: the mic sends no caller sound while the agent speaks and until its audio has finished playing (plus 300 ms), so the bot never answers itself. Any line noise carries on through that time, as on a real line. Barge-in comes in #10.
+- `src/call/call-client.ts` — one call over `/ws/call`. The mic sends no caller sound while the agent speaks and until its audio has finished playing (plus 300 ms), so the bot never answers itself. Any line noise carries on through that time, as on a real line. If the caller talks over the agent anyway (their own level, after the browser's echo cancellation, at RMS ≥ 0.04 for 160 ms), playback stops, the mic opens and the page sends `barge_in`, so the backend cuts the line and takes what the caller says as the next turn (#10). Speakers loud enough to beat the echo cancellation can trigger it; a headset avoids that.
 
 ## Supervisor console (`/supervisor`)
 
