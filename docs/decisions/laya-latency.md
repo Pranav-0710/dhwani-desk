@@ -66,3 +66,21 @@ huggingface-cli upload Dhwanidesk/dhwani-desk-laya export/ckpt/model.onnx.data o
 ```
 
 Then tag that commit, set `LAYA_CHECKPOINT_REVISION` to the tag and `DECIDER=laya`, and run `scripts.laya_latency` again. The backend expects Laya's files at the repo root (`rl_agent_config.json`, `tokenizer/`) and the graph in `onnx/`. Every ticket stores the repo and commit that decided it (`laya:<repo>@<commit>`).
+
+## End of caller speech to first agent audio (#22)
+
+Measured with `scripts.call_smoke` against the fine-tuned checkpoint (`kn-ft-v1`) on the laptop, with background apps running. The caller's lines are Timbre voices, so this is the pipeline's time, not a human's. The figure is taken from the end of the caller's words; the script then sends 1.5 s of silence so Prisma closes the segment.
+
+| Line the agent says | First audio after the caller stopped |
+| --- | --- |
+| A question (cached after the first call) | 2.0–2.2 s |
+| The same, first call after start-up | 3.3 s |
+| The ticket read-back (ticket number and ward, so Timbre every time) | 2.6–2.75 s |
+
+Where the time goes, for a cached question: Prisma returns the transcript about 1.4 s after the words end (the segment closing), the turn collector waits `TURN_PAUSE_S` = 0.6 s for more of the sentence, the decision takes about 0.6 s with the 0.6 s pause counted in, and a cached line then starts at once. A line sent to Timbre adds about 1.1 s.
+
+The ≤ 1.5 s target is not met. Most of the gap is Prisma's segment closing, which the backend does not control. What the backend can change:
+
+- Shorten `TURN_PAUSE_S`. It costs the full pause on every turn, but a shorter one risks cutting a caller's sentence into two turns and two replies. Tune it only against real callers.
+- Keep a rehearsal call before any demo: the first call after start-up speaks every fixed line through Timbre.
+- Split the ticket line into a cached part and a short number part.
