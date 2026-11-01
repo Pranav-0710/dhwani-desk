@@ -26,7 +26,7 @@ RATE = 16000
 # Each call: the lines, and how long to wait before each (the greeting, then the agent's reply).
 CALLS: dict[str, list[tuple[float, str]]] = {
     "call1": [
-        (7.0, "ನಮ್ಮ ಮನೆ ಹತ್ತಿರ ಶಾಲೆ ಮುಂದೆ ಚರಂಡಿ ತೆರೆದಿದೆ"),
+        (7.0, "ಕಸದ ಗಾಡಿ ಒಂದು ವಾರದಿಂದ ಬಂದಿಲ್ಲ"),
         (10.0, "ಹೂವಿನಕೇರಿ, ಸರ್ಕಾರಿ ಶಾಲೆ ಹತ್ತಿರ"),
     ],
     "call2": [
