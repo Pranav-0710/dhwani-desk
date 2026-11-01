@@ -42,3 +42,4 @@ From 2026-10-28 Lakshmi Narasimman is away again, and Jey Pranav is doing the re
 | 2026-10-31 | Jey Pranav | #51 | Fine-tuned Laya on by default; Hub checkpoints load as real files ONNX Runtime accepts (#50) |
 | 2026-10-31 | Jey Pranav | #53 | Held-out test set: 150 sentences, Timbre-voiced audio, Prisma transcripts, first fine-tuned report (#13) |
 | 2026-10-31 | Jey Pranav | #52 | Barge-in: the caller can talk over the agent; playback stops and the line is cut (#10) |
+| 2026-11-01 | Jey Pranav | #54 | Teaser and demo posts: [X](https://x.com/jey_pranav53258/status/2116867959910191274), [LinkedIn](https://lnkd.in/p/gNMNPkh4) (#20) |
