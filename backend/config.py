@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     # Browser sessions streaming to Prisma at once, across /ws/stt and /ws/call.
     max_stt_sessions: int = 2
+    # Of those, sessions one caller (one IP address) may hold at once: a script cannot take
+    # every line. 0 turns the per-caller limit off.
+    max_sessions_per_client: int = 1
 
     @field_validator("allowed_origins")
     @classmethod

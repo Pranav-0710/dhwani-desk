@@ -111,6 +111,9 @@ def test_the_cap_defaults_to_two_sessions(monkeypatch: pytest.MonkeyPatch) -> No
     third = ScriptedBrowser([])
     callers = [ScriptedBrowser([], leave_when=lambda sent: third.closed_with is not None)]
     callers.append(ScriptedBrowser([], leave_when=lambda sent: third.closed_with is not None))
+    # Three different callers, so only the total cap is tested here.
+    for number, browser in enumerate([*callers, third]):
+        browser.headers["x-real-ip"] = f"198.51.100.{number}"
 
     async def scenario() -> None:
         on_the_line = [asyncio.create_task(app_module.stt_proxy(c)) for c in callers]
@@ -228,3 +231,35 @@ def test_a_short_console_token_is_refused() -> None:
         isolated_settings(console_token="demo")
     assert isolated_settings(console_token="").console_token.get_secret_value() == ""
     assert isolated_settings(console_token="x" * 20).console_token.get_secret_value() == "x" * 20
+
+
+def test_one_caller_cannot_take_every_line(monkeypatch: pytest.MonkeyPatch) -> None:
+    use_settings(monkeypatch)  # two lines in all, one per caller
+    second = ScriptedBrowser([])
+    first = ScriptedBrowser([], leave_when=lambda sent: second.closed_with is not None)
+    for browser in (first, second):
+        browser.headers["x-real-ip"] = "203.0.113.7"
+
+    async def scenario() -> None:
+        on_the_line = asyncio.create_task(app_module.stt_proxy(first))
+        async with asyncio.timeout(5):
+            while not connected(first.sent):
+                await asyncio.sleep(0.01)
+        await app_module.stt_proxy(second)
+        await on_the_line
+
+    asyncio.run(scenario())
+
+    assert second.sent == [app_module.LINE_BUSY]
+
+
+def test_a_session_ends_at_its_time_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    use_settings(monkeypatch)
+    monkeypatch.setattr(app_module, "stt_max_session_s", 0.0)
+    # Audio keeps arriving, so only the time limit can end it.
+    browser = ScriptedBrowser([bytes(320)] * 5, leave_when=lambda sent: False)
+
+    asyncio.run(app_module.stt_proxy(browser))
+
+    assert browser.sent[-1] == app_module.TOO_LONG
+    assert browser.closed_with == 1008

@@ -65,7 +65,8 @@ def test_proxy_reports_rejected_key(monkeypatch: pytest.MonkeyPatch) -> None:
         with pytest.raises(WebSocketDisconnect) as disconnect:
             ws.receive_json()
 
-    assert error == {"type": "error", "message": "Prisma rejected the connection: HTTP 401"}
+    # The vendor's reason is logged, not sent to the browser.
+    assert error == app_module.STT_FAILED
     assert disconnect.value.code == 1011
 
 
@@ -81,7 +82,7 @@ def test_proxy_reports_overflow(monkeypatch: pytest.MonkeyPatch) -> None:
         error = ws.receive_json()
 
     assert error["type"] == "error"
-    assert "real time" in error["message"]
+    assert error == app_module.STT_FAILED
 
 
 def test_proxy_reports_missing_api_key(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -13,6 +13,8 @@ logger = logging.getLogger("dhwani.speaker")
 
 # Longest an agent line may take from request to last chunk before it is abandoned.
 UTTERANCE_DEADLINE_S = 20.0
+# What the browser is told when a line cannot be spoken; the reason is only logged.
+TTS_FAILED = "The agent's voice is unavailable for this line"
 
 
 class SpeechStream(Protocol):
@@ -101,10 +103,11 @@ class Speaker:
             raise
         except (TimbreError, TimeoutError) as exc:
             logger.warning("TTS failed: %s", exc)
-            await self._outbox.json({"type": "tts_error", "message": str(exc) or "timed out"})
-        except Exception as exc:
+            # The detail (Timbre's own error text) stays in the log above.
+            await self._outbox.json({"type": "tts_error", "message": TTS_FAILED})
+        except Exception:
             logger.exception("Unexpected TTS failure")
-            await self._outbox.json({"type": "tts_error", "message": type(exc).__name__})
+            await self._outbox.json({"type": "tts_error", "message": TTS_FAILED})
         await self._outbox.json({"type": "agent_audio_end"})
 
     def _played(self, pcm: bytes) -> None:

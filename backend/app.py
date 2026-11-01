@@ -1,4 +1,5 @@
 import asyncio
+import collections
 import contextlib
 import functools
 import hmac
@@ -158,19 +159,33 @@ class SessionCount:
 
     def __init__(self) -> None:
         self.open = 0
+        self.by_client: collections.Counter[str] = collections.Counter()
 
     @contextlib.contextmanager
-    def hold(self, limit: int) -> Iterator[bool]:
+    def hold(self, limit: int, client: str = "", per_client: int = 0) -> Iterator[bool]:
         """Count one session while the block runs. Yields False, counting nothing, when
-        `limit` are already open."""
-        if self.open >= limit:
+        `limit` are already open, or `per_client` (if set) from this `client`."""
+        if self.open >= limit or (per_client and self.by_client[client] >= per_client):
             yield False
             return
         self.open += 1
+        self.by_client[client] += 1
         try:
             yield True
         finally:
             self.open -= 1
+            self.by_client[client] -= 1
+            if not self.by_client[client]:
+                del self.by_client[client]
+
+
+def _client(websocket: WebSocket) -> str:
+    """Who is calling: the address nginx passes in X-Real-IP (Cloudflare's client IP behind the
+    tunnel), or the socket's peer when there is no nginx in front (local development)."""
+    if real_ip := websocket.headers.get("x-real-ip"):
+        return real_ip
+    peer = getattr(websocket, "client", None)
+    return peer.host if peer else ""
 
 
 stt_sessions = SessionCount()
@@ -179,6 +194,11 @@ LINE_BUSY = {"type": "error", "message": "The line is busy; please try again in 
 # hold one of the few sessions. The phone page streams all the time, silence included.
 stt_quiet_s = 30.0
 WENT_QUIET = {"type": "error", "message": "No audio arrived for too long; call ended"}
+STT_FAILED = {"type": "error", "message": "Speech recognition is unavailable; call ended"}
+# The longest one session may last, so a script streaming silence cannot hold a session (and
+# spend credits) for ever. A real complaint call takes a minute or two.
+stt_max_session_s = 600.0
+TOO_LONG = {"type": "error", "message": "The call reached its time limit; call ended"}
 
 TEMPLATES = load_templates()
 TTS_CACHE: AudioCache = {}
@@ -326,7 +346,9 @@ async def stt_proxy(websocket: WebSocket) -> None:
     settings = get_settings()
     if not await _admit(websocket, settings):
         return
-    with stt_sessions.hold(settings.max_stt_sessions) as held:
+    with stt_sessions.hold(
+        settings.max_stt_sessions, _client(websocket), settings.max_sessions_per_client
+    ) as held:
         if not held:
             await _line_busy(websocket)
             return
@@ -358,7 +380,9 @@ async def call(websocket: WebSocket) -> None:
     settings = get_settings()
     if not await _admit(websocket, settings):
         return
-    with stt_sessions.hold(settings.max_stt_sessions) as held:
+    with stt_sessions.hold(
+        settings.max_stt_sessions, _client(websocket), settings.max_sessions_per_client
+    ) as held:
         if not held:
             await _line_busy(websocket)
             return
@@ -500,7 +524,10 @@ async def _converse(
                 await hand_off_on_failure()
                 return
             await store_turn(decision.contains_personal_id)
-            await answer(dialogue.respond(decision))
+            # In a thread: a reply that closes the call files the ticket, a SQLite write that can
+            # wait on the store's lock (a purge, another call's turn) and would stall every call.
+            # Only this task changes the dialogue, so nothing else races it meanwhile.
+            await answer(await asyncio.to_thread(dialogue.respond, decision))
 
         async def obey(command: OfficerCommand) -> None:
             if command.done.done():
@@ -646,6 +673,9 @@ async def _stt_session(
             if ended_by == "quiet":
                 stream.discard_pending()
                 return WENT_QUIET, 1008
+            if ended_by == "too_long":
+                stream.discard_pending()
+                return TOO_LONG, 1008
         closed = {
             "type": "closed",
             "by": "prisma",
@@ -657,7 +687,8 @@ async def _stt_session(
         logger.warning("STT session failed: %s", exc)
         if failures is not None:
             failures.append(exc)
-        return {"type": "error", "message": str(exc)}, 1011
+        # The detail (Prisma's own close reason, account or quota text) stays in the log.
+        return STT_FAILED, 1011
     except WebSocketDisconnect:
         return None
 
@@ -670,25 +701,31 @@ async def _relay(
     on_barge_in: Callable[[], None] | None = None,
 ) -> str:
     """Pump audio up and events down until one side ends or `stop` is set; returns "browser",
-    "prisma", "agent" or "quiet" (no audio for `stt_quiet_s`). A `barge_in` text frame (the
-    caller spoke over the agent) goes to `on_barge_in`."""
-    went_quiet = False
+    "prisma", "agent", "quiet" (no audio for `stt_quiet_s`) or "too_long" (the session reached
+    `stt_max_session_s`). A `barge_in` text frame (the caller spoke over the agent) goes to
+    `on_barge_in`."""
+    went_quiet = too_long = False
 
     async def pump_audio() -> None:
-        nonlocal went_quiet
+        nonlocal went_quiet, too_long
         loop = asyncio.get_running_loop()
         deadline = loop.time() + stt_quiet_s
+        end_of_session = loop.time() + stt_max_session_s
         while True:
-            quiet = asyncio.timeout_at(deadline)
+            quiet = asyncio.timeout_at(min(deadline, end_of_session))
             try:
                 async with quiet:
                     message = await websocket.receive()
             except TimeoutError:
                 if not quiet.expired():
                     raise
-                went_quiet = True
+                too_long = loop.time() >= end_of_session
+                went_quiet = not too_long
                 return
             if message["type"] == "websocket.disconnect":
+                return
+            if loop.time() >= end_of_session:
+                too_long = True
                 return
             if message.get("bytes"):
                 deadline = loop.time() + stt_quiet_s
@@ -711,6 +748,8 @@ async def _relay(
         for task in done:
             task.result()
         if audio in done:
+            if too_long:
+                return "too_long"
             return "quiet" if went_quiet else "browser"
         return "prisma" if events in done else "agent"
     finally:

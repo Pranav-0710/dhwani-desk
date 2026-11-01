@@ -13,7 +13,7 @@ import re
 import unicodedata
 
 from config import REPO_ROOT
-from tickets.masking import LONG_NUMBER
+from tickets.masking import says_long_number
 
 WARDS = json.loads((REPO_ROOT / "data" / "wards.json").read_text("utf-8"))["wards"]
 TEMPLATES = json.loads((REPO_ROOT / "data" / "generation" / "scenarios.json").read_text("utf-8"))
@@ -106,4 +106,4 @@ def find_ward(transcript: str) -> str:
 
 def says_personal_number(transcript: str) -> bool:
     """A phone, Aadhaar or account number: the same rule that masks it before storage."""
-    return LONG_NUMBER.search(transcript) is not None
+    return says_long_number(transcript)

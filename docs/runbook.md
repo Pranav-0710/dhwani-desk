@@ -59,6 +59,7 @@ Anyone with the address can reach the app, and every call spends Gnani credits, 
 - **Two calls at a time** (`MAX_STT_SESSIONS`). One more is told the line is busy, before Prisma is opened.
 - **Silent sockets are hung up** after 30 s without audio, so nobody can hold the line open for free.
 - **Port 8080 is bound to localhost.** Other devices reach the app through the tunnel, not over the local network.
+- **One call per caller, ten minutes at most.** Each IP address (Cloudflare's client IP, passed by nginx as `X-Real-IP`) may hold one of the `MAX_STT_SESSIONS` lines at a time (`MAX_SESSIONS_PER_CLIENT`), and a session ends after 10 minutes, so one script cannot hold every line.
 - **The token routes are rate-limited.** nginx allows 5 requests a second to `/api/` (bursts of 20) and one console connection a second (bursts of 5) per client, keyed on the IP Cloudflare passes in `CF-Connecting-IP`; more get HTTP 429.
 - **The console and the tickets API need `CONSOLE_TOKEN`.** The console sends it in its first message. `/api/tickets` and `/api/thresholds` need it as `Authorization: Bearer <token>`, because tickets hold where callers are.
 - **The backend's port is not published.** Only the console container reaches it.

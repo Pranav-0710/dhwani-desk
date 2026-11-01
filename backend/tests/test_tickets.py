@@ -44,6 +44,16 @@ def request(**overrides: object) -> TicketRequest:
         ("984.501.2345", 0.1, "XXX.XXX.XXXX"),
         ("98450 — 12345", 0.1, "XXXXX — XXXXX"),
         ("೯೮೪೫೦೧೨೩೪೫", 0.1, "XXXXXXXXXX"),
+        # The number said digit by digit in words, Kannada or English in Kannada script.
+        (
+            "ನನ್ನ ನಂಬರ್ ಒಂಬತ್ತು ಎಂಟು ನಾಲ್ಕು ಐದು ಸೊನ್ನೆ ಒಂದು ಎರಡು ಮೂರು ನಾಲ್ಕು ಐದು",
+            0.1,
+            "ನನ್ನ ನಂಬರ್ XXXXXXX XXXX XXXXXX XXX XXXXXX XXXX XXXX XXXX XXXXXX XXX",
+        ),
+        ("ನೈನ್ ಎಯ್ಟ್ ಫೋರ್ ಫೈವ್ 0 1 2 3 4 5", 0.1, "XXXX XXXXX XXXX XXXX X X X X X X"),
+        ("ಖಾತೆ ಫೋರ್ ಫೈವ್ ಟೂ ಒನ್", 0.9, "ಖಾತೆ XXXX XXXX XX XXX"),
+        # Number words in a sentence are not a number: three days, one week.
+        ("ಮೂರು ದಿನದಿಂದ ಒಂದು ವಾರ ಆರು ಗಂಟೆ", 0.9, "ಮೂರು ದಿನದಿಂದ ಒಂದು ವಾರ ಆರು ಗಂಟೆ"),
     ],
 )
 def test_personal_numbers_are_masked(text: str, personal_id: float, expected: str) -> None:
@@ -227,3 +237,16 @@ def test_the_bearer_scheme_is_case_insensitive(ticket_store, console_token) -> N
     headers = {"Authorization": "bearer  console-test-token-0123 "}
     with TestClient(app_module.app, headers=headers) as client:
         assert client.get("/api/thresholds").status_code == 200
+
+
+def test_a_corrected_ward_is_filed_with_the_words_that_corrected_it() -> None:
+    ward_only = dataclasses.replace(NOTHING, ward="w05", has_location=0.9)
+    desk = CountingDesk()
+    call = Dialogue(load_templates(), ScriptedDecider(ward_only, ROADS_IN_W04), desk)
+
+    call.turn("ಕೆರೆಕೋಡಿ ಬಸ್ ಸ್ಟ್ಯಾಂಡ್ ಹತ್ತಿರ")
+    call.turn("ಕ್ಷಮಿಸಿ, ಗಾಂಧಿನಗರ, ರೋಡ್ ಹಾಳಾಗಿದೆ")
+
+    (filed,) = desk.filed
+    assert filed.ward == "w04"
+    assert filed.location_text == "ಕೆರೆಕೋಡಿ ಬಸ್ ಸ್ಟ್ಯಾಂಡ್ ಹತ್ತಿರ ಕ್ಷಮಿಸಿ, ಗಾಂಧಿನಗರ, ರೋಡ್ ಹಾಳಾಗಿದೆ"
