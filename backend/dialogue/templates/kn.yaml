@@ -11,9 +11,13 @@ lines:
   # Sorry, I didn't quite understand the problem. Could you describe it in a little more detail?
   ask_problem: "ಕ್ಷಮಿಸಿ, ಸಮಸ್ಯೆ ಸರಿಯಾಗಿ ಅರ್ಥ ಆಗಲಿಲ್ಲ. ಏನು ಸಮಸ್ಯೆ ಅಂತ ಸ್ವಲ್ಪ ವಿವರವಾಗಿ ಹೇಳ್ತೀರಾ?"
 
-  # Okay, one moment. (Said by the call route while a slow decision runs, so the caller is not
-  # left in silence.)
-  hold_on: "ಸರಿ, ಒಂದು ಕ್ಷಣ."
+  # Okay. (Said by the call route as soon as a caller's turn ends, so the caller hears the agent
+  # while Laya decides.)
+  ack: "ಸರಿ."
+
+  # One moment. (Said by the call route while a slow decision runs, when `ack` is turned off, so
+  # the caller is not left in silence.)
+  hold_on: "ಒಂದು ಕ್ಷಣ."
 
   # Thank you for waiting. I will carry on with your complaint now. (Said when an officer
   # hands the call back to the agent.)

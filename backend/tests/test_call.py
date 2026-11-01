@@ -200,6 +200,22 @@ def test_call_greets_on_connect_then_answers_the_callers_turn(
     assert tts.closed
 
 
+def test_the_agent_says_okay_as_soon_as_the_caller_finishes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tts = FakeTts()
+    use_dialogue_fakes(monkeypatch, tts)
+    monkeypatch.setattr(app_module, "acknowledge_turns", True)
+    browser = ScriptedBrowser([bytes(1024)], leave_when=ended_lines(3))
+
+    asyncio.run(app_module.call(browser))
+
+    greeting, ack, ask_problem = (
+        app_module.TEMPLATES.lines[k] for k in ("greeting", "ack", "ask_problem")
+    )
+    assert tts.spoken == [greeting, ack, ask_problem]
+
+
 def test_a_whole_call_ends_with_a_ticket(
     monkeypatch: pytest.MonkeyPatch, ticket_store: TicketStore
 ) -> None:

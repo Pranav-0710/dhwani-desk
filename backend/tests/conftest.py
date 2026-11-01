@@ -19,6 +19,12 @@ def keyword_decider(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def no_turn_ack(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Most tests check the exact lines spoken; the `ack` line has its own test."""
+    monkeypatch.setattr(app_module, "acknowledge_turns", False)
+
+
+@pytest.fixture(autouse=True)
 def ticket_store(monkeypatch: pytest.MonkeyPatch) -> TicketStore:
     store = TicketStore(":memory:")
     monkeypatch.setattr(app_module, "get_ticket_store", lambda: store)
