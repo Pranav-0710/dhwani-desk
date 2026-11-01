@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from gnani.timbre import DEFAULT_VOICE, SAMPLE_RATES
 
 BACKEND_DIR = Path(__file__).resolve().parent
+MIN_CONSOLE_TOKEN = 20
 REPO_ROOT = BACKEND_DIR.parent
 
 
@@ -72,6 +73,17 @@ class Settings(BaseSettings):
                 )
             origins.append(origin.removesuffix({"http": ":80", "https": ":443"}[scheme]))
         return ",".join(origins)
+
+    @field_validator("console_token")
+    @classmethod
+    def _console_token(cls, value: SecretStr) -> SecretStr:
+        # The token can speak to callers and read where they are; a short one can be guessed.
+        if value.get_secret_value() and len(value.get_secret_value()) < MIN_CONSOLE_TOKEN:
+            raise ValueError(
+                f"CONSOLE_TOKEN must be at least {MIN_CONSOLE_TOKEN} characters, e.g. "
+                '`python -c "import secrets; print(secrets.token_urlsafe(24))"`'
+            )
+        return value
 
     @field_validator("max_stt_sessions")
     @classmethod

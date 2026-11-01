@@ -29,7 +29,9 @@ services:
       context: .
       dockerfile: console/Dockerfile
     ports:
-      - "8080:80"
+      # Localhost only: the tunnel connects from this machine, and nobody else on the
+      # network reaches the console.
+      - "127.0.0.1:8080:80"
     depends_on:
       backend:
         condition: service_healthy
