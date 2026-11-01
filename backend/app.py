@@ -28,7 +28,15 @@ from dialogue.machine import Dialogue, OfficerError, Reply, State
 from dialogue.standin import KeywordDecider
 from dialogue.templates import load_templates
 from dialogue.turns import TURN_PAUSE_S, TurnCollector
-from gnani.prisma import PrismaConfig, PrismaError, PrismaStream, SttEvent, load_bias_words
+from gnani.prisma import (
+    PrismaClosed,
+    PrismaConfig,
+    PrismaError,
+    PrismaStream,
+    PrismaUnavailable,
+    SttEvent,
+    load_bias_words,
+)
 from gnani.timbre import TimbreClient, TimbreConfig
 from tickets.store import FIRST_NUMBER, TicketStore
 
@@ -563,6 +571,7 @@ async def _converse(
         background.append(asyncio.create_task(answer_turns()))
         try:
             for attempt in range(STT_RECONNECTS + 1):
+                failures: list[PrismaError] = []
                 final = await _stt_session(
                     websocket,
                     settings,
@@ -571,8 +580,14 @@ async def _converse(
                     converse,
                     stop=agent_hung_up,
                     on_barge_in=speaker.interrupt,
+                    failures=failures,
                 )
-                if final is None or final[1] not in (1000, 1011) or attempt == STT_RECONNECTS:
+                # Retry only what a new session can fix: Prisma closing on its own, or a failed
+                # connect. A rejected key or an audio overflow would fail again the same way.
+                recoverable = (final is not None and final[1] == 1000) or any(
+                    isinstance(exc, PrismaClosed | PrismaUnavailable) for exc in failures
+                )
+                if not recoverable or agent_hung_up.is_set() or attempt == STT_RECONNECTS:
                     break
                 logger.warning("Prisma ended the session mid-call; reconnecting (%d)", attempt + 1)
                 await asyncio.sleep(STT_RECONNECT_DELAY_S)
@@ -600,9 +615,11 @@ async def _stt_session(
     on_event: EventHandler,
     stop: asyncio.Event | None = None,
     on_barge_in: Callable[[], None] | None = None,
+    failures: list[PrismaError] | None = None,
 ) -> FinalMessage | None:
     """Run one Prisma session for this socket. Returns the message to end the session with,
-    or None when the browser left or `stop` was set (the caller has nothing more to send)."""
+    or None when the browser left or `stop` was set (the caller has nothing more to send).
+    A Prisma failure is also appended to `failures`, for a caller deciding whether to retry."""
     try:
         async with stt_stream_factory(settings) as stream:
             await outbox.json(config)
@@ -622,6 +639,8 @@ async def _stt_session(
         return closed, 1000
     except PrismaError as exc:
         logger.warning("STT session failed: %s", exc)
+        if failures is not None:
+            failures.append(exc)
         return {"type": "error", "message": str(exc)}, 1011
     except WebSocketDisconnect:
         return None

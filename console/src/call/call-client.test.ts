@@ -69,6 +69,7 @@ function setup() {
   let micResolve: ((mic: Mic) => void) | null = null
   let onPcm: ((pcm: Int16Array<ArrayBuffer>) => void) | null = null
   let onLevel: ((rms: number) => void) | undefined
+  let micStarts = 0
   const mic = {
     stopped: false,
     noise: [] as NoiseLevel[],
@@ -82,6 +83,7 @@ function setup() {
     now: () => clock,
     // Mutes as the real mic does with no line noise: the caller's sound becomes silence.
     startMic: (_rate, callback, muted, level) => {
+      micStarts += 1
       onPcm = (pcm) => callback(muted() ? new Int16Array(pcm.length) : pcm)
       onLevel = level
       return new Promise<Mic>((resolve) => (micResolve = resolve))
@@ -95,6 +97,7 @@ function setup() {
     player,
     events,
     mic,
+    micStarts: () => micStarts,
     statuses: () => events.filter((e) => e.type === 'status').map((e) => e.status),
     grantMic: async () => {
       micResolve?.(mic)
@@ -128,6 +131,18 @@ describe('CallClient', () => {
     call.socket.serverSends({ type: 'connected' })
     await call.grantMic()
 
+    expect(call.statuses()).toEqual(['connecting', 'listening'])
+  })
+
+  it('keeps one mic when the server reconnects to Prisma mid-call', async () => {
+    const call = setup()
+    call.socket.serverSends({ type: 'connected' })
+    await call.grantMic()
+    call.socket.serverSends({ type: 'config', sample_rate: 8000, tts_sample_rate: 16000 })
+    call.socket.serverSends({ type: 'connected' })
+    await flush()
+
+    expect(call.micStarts()).toBe(1)
     expect(call.statuses()).toEqual(['connecting', 'listening'])
   })
 
