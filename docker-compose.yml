@@ -13,6 +13,10 @@ services:
     environment:
       # The page the browser opens; add the tunnel's https address here when sharing it.
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080}
+      # Inside the container the data lives on the volume, whatever .env says for running
+      # without Docker (its DATABASE_URL points at backend/, which the app's user cannot write).
+      DATABASE_URL: sqlite:////var/lib/dhwani/dhwani.db
+      HF_HOME: /var/lib/dhwani/hf
     volumes:
       - tickets:/var/lib/dhwani
     # Not published: only the console container reaches it, so one origin faces the world.
