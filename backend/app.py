@@ -336,7 +336,9 @@ async def call(websocket: WebSocket) -> None:
     "one moment" while a slow decision runs), `agent_audio_start` (`sample_rate`), binary
     16-bit mono PCM frames, `agent_audio_end`, and `tts_error` (the call continues). When the
     agent closes the call, `call_ended` (`reason`) follows its last line and the server hangs
-    up.
+    up. The browser sends the text frame `barge_in` when the caller speaks over the agent: the
+    line being said is cut (its `agent_audio_end` is marked `interrupted`), queued lines are
+    dropped, and what the caller says is a new turn.
     """
     settings = get_settings()
     if not await _admit(websocket, settings):
@@ -546,7 +548,13 @@ async def _converse(
         background.append(asyncio.create_task(answer_turns()))
         try:
             final = await _stt_session(
-                websocket, settings, outbox, config, converse, stop=agent_hung_up
+                websocket,
+                settings,
+                outbox,
+                config,
+                converse,
+                stop=agent_hung_up,
+                on_barge_in=speaker.interrupt,
             )
         finally:
             for task in background:
@@ -571,13 +579,14 @@ async def _stt_session(
     config: dict[str, Any],
     on_event: EventHandler,
     stop: asyncio.Event | None = None,
+    on_barge_in: Callable[[], None] | None = None,
 ) -> FinalMessage | None:
     """Run one Prisma session for this socket. Returns the message to end the session with,
     or None when the browser left or `stop` was set (the caller has nothing more to send)."""
     try:
         async with stt_stream_factory(settings) as stream:
             await outbox.json(config)
-            ended_by = await _relay(websocket, stream, on_event, stop)
+            ended_by = await _relay(websocket, stream, on_event, stop, on_barge_in)
             if ended_by in ("browser", "agent"):
                 stream.discard_pending()
                 return None
@@ -603,9 +612,11 @@ async def _relay(
     stream: PrismaStream,
     on_event: EventHandler,
     stop: asyncio.Event | None = None,
+    on_barge_in: Callable[[], None] | None = None,
 ) -> str:
     """Pump audio up and events down until one side ends or `stop` is set; returns "browser",
-    "prisma", "agent" or "quiet" (no audio for `stt_quiet_s`)."""
+    "prisma", "agent" or "quiet" (no audio for `stt_quiet_s`). A `barge_in` text frame (the
+    caller spoke over the agent) goes to `on_barge_in`."""
     went_quiet = False
 
     async def pump_audio() -> None:
@@ -629,6 +640,8 @@ async def _relay(
                 await stream.send_audio(message["bytes"])
             elif message.get("text") == "flush":
                 await stream.flush()
+            elif message.get("text") == "barge_in" and on_barge_in is not None:
+                on_barge_in()
 
     async def pump_events() -> None:
         async for event in stream.events():

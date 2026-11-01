@@ -6,8 +6,8 @@ code (decisions/extractors.py). Timings are in docs/decisions/laya-latency.md.
 
 The checkpoint is pinned: a Hugging Face repo at a tag or commit, so a new upload cannot change
 a running build, or a local directory for trying an export before it is uploaded. Either way it
-holds Laya's own files (rl_agent_config.json, tokenizer/) and the ONNX graph from
-training/export_onnx.py in onnx/.
+holds Laya's own files (rl_agent_config.json, tokenizer/) and the ONNX graph in onnx/, as
+training/finetune_laya.py publishes it.
 """
 
 import logging
@@ -56,13 +56,15 @@ class LayaDecider:
     def load(cls, settings: Settings) -> "LayaDecider":
         """Load the checkpoint `settings` name; slow (seconds), so done once at startup."""
         source = settings.laya_checkpoint_repo
+        if not source:
+            raise ValueError("Set LAYA_CHECKPOINT_REPO for DECIDER=laya")
         if Path(source).is_dir():
             checkpoint = Path(source)
             revision = f"laya:{checkpoint.resolve().name}@local"
         else:
             token = settings.hf_token.get_secret_value() or None
             checkpoint = _download(source, settings.laya_checkpoint_revision, token)
-            # Hub snapshots are stored in a directory named after the commit.
+            # Downloads are stored in a directory named after the commit.
             revision = f"laya:{source}@{checkpoint.name}"
         from laya.onnx_agent import ONNXAgent
 
@@ -135,11 +137,17 @@ def _download(repo: str, revision: str, token: str | None) -> Path:
         raise ValueError(
             "Set LAYA_CHECKPOINT_REVISION to a tag or commit of LAYA_CHECKPOINT_REPO, not a branch"
         )
-    from huggingface_hub import snapshot_download
+    from huggingface_hub import HfApi, constants, snapshot_download
 
-    return Path(
-        snapshot_download(repo, revision=revision, token=token, allow_patterns=CHECKPOINT_FILES)
+    # Real files in a directory of their own, not the Hub cache's links into its blob store:
+    # ONNX Runtime refuses weights (onnx/model.onnx.data) that resolve outside the graph's
+    # directory.
+    commit = HfApi(token=token).model_info(repo, revision=revision).sha
+    target = Path(constants.HF_HOME) / "laya-checkpoints" / repo.replace("/", "--") / commit
+    snapshot_download(
+        repo, revision=commit, token=token, allow_patterns=CHECKPOINT_FILES, local_dir=target
     )
+    return target
 
 
 def _cpu_session(onnx_path: Path, threads: int) -> Any:

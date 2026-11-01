@@ -123,7 +123,7 @@ Then, per agent line, in order:
 
 When the agent closes the call (ticket filed or request redirected), the server waits until the browser has played the last line, sends `call_ended` (`reason`), and closes the socket with 1000. A handed-off call stays open for the officer.
 
-A Timbre failure sends `tts_error` (`message`) before `agent_audio_end`; the call continues. Every `agent_audio_start` is followed by an `agent_audio_end`, because the phone page mutes its mic in between. When the call ends (browser leaves, or Prisma closes or fails), a line being spoken is cut off and queued lines are dropped. `config` also carries `tts_sample_rate`.
+A Timbre failure sends `tts_error` (`message`) before `agent_audio_end`; the call continues. Every `agent_audio_start` is followed by an `agent_audio_end`, because the phone page mutes its mic in between. On `/ws/call` the browser sends the text frame `barge_in` when the caller talks over the agent: the line being sent is cut, its `agent_audio_end` carries `interrupted: true`, queued lines are dropped, and what the caller says is the next turn. When the call ends (browser leaves, or Prisma closes or fails), a line being spoken is cut off and queued lines are dropped. `config` also carries `tts_sample_rate`.
 
 The phone page in `console/` is the browser side of this route. To try a call without a microphone, `uv run python -m scripts.call_smoke` phones the running server with synthetic caller speech and prints the transcripts, decisions and agent lines with timings. It calls as the first page on `ALLOWED_ORIGINS` (`--origin` to change).
 

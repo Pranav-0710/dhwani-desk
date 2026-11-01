@@ -25,7 +25,8 @@ class Speaker:
     For each line the browser receives `agent_text`, `agent_audio_start` (sample rate),
     binary PCM frames, then `agent_audio_end` — always, even when synthesis fails, because
     the browser mutes its mic between start and end. A failure also sends `tts_error`; the
-    call carries on with the next line. Lines still queued when the call ends are dropped.
+    call carries on with the next line. A line cut by `interrupt` ends with `agent_audio_end`
+    marked `interrupted`. Lines still queued when the call ends are dropped.
 
     The queue is unbounded; the dialogue queues one reply (a few lines) per caller turn.
     """
@@ -39,10 +40,22 @@ class Speaker:
         # plays chunks back to back from the first one's arrival, and Timbre sends faster
         # than real time, so the audio is still playing after the last chunk has gone.
         self._heard_by = 0.0
+        self._line: asyncio.Task[None] | None = None
         self._worker = asyncio.create_task(self._run())
 
     def say(self, text: str) -> None:
         self._lines.put_nowait(text)
+
+    def interrupt(self) -> None:
+        """The caller spoke over the agent (barge-in): stop the line being sent and drop the
+        queued ones. The browser has already stopped playing; it gets `agent_audio_end` with
+        `interrupted` for the cut line."""
+        while not self._lines.empty():
+            self._lines.get_nowait()
+            self._lines.task_done()
+        if self._line is not None and not self._line.done():
+            self._line.cancel()
+        self._heard_by = asyncio.get_running_loop().time()
 
     async def wait_until_heard(self) -> None:
         """Return once every queued line has been sent and should have finished playing."""
@@ -57,14 +70,22 @@ class Speaker:
     async def _run(self) -> None:
         while True:
             text = await self._lines.get()
+            line = self._line = asyncio.create_task(self._speak(text))
             try:
-                await self._speak(text)
+                try:
+                    await line
+                except asyncio.CancelledError:
+                    current = asyncio.current_task()
+                    if current is not None and current.cancelling():
+                        raise  # the speaker is closing, not the line being cut
+                    await self._outbox.json({"type": "agent_audio_end", "interrupted": True})
             except (WebSocketDisconnect, RuntimeError, OSError):
                 # The browser has gone: nobody to speak to.
                 return
             except Exception:
                 logger.exception("Speaking a line failed; continuing with the next one")
             finally:
+                self._line = None
                 self._lines.task_done()
 
     async def _speak(self, text: str) -> None:
