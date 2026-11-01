@@ -48,3 +48,4 @@ From 2026-10-28 Lakshmi Narasimman is away again, and Jey Pranav is doing the re
 | 2026-11-01 | Jey Pranav | #58 | Latency measured with the fine-tuned model; the agent says "okay" as soon as a turn ends, first audio about 1.5 s (#22) |
 | 2026-11-01 | Jey Pranav | #60 | A call opens a new Prisma session when one drops mid-call, up to 3 times, without greeting again (#59) |
 | 2026-11-01 | Jey Pranav | #62 | Reconnect follow-up: one microphone per call, retry only recoverable Prisma failures, not after hang-up (#61) |
+| 2026-11-01 | Jey Pranav | #64 | Demo hardening: SQLite side files ignored, port 8080 on localhost only, console token at least 20 characters, rate limits on the token routes (#63) |

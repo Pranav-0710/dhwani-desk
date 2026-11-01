@@ -17,7 +17,7 @@ from decisions import thresholds
 from dialogue.live import MAX_BACKLOG, Watcher
 from tickets.store import TicketStore
 
-TOKEN = "console-test-token"
+TOKEN = "console-test-token-0123"
 
 
 @pytest.fixture
