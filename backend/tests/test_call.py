@@ -1,5 +1,6 @@
 import asyncio
 import dataclasses
+import sqlite3
 import threading
 import time
 from collections.abc import AsyncIterator
@@ -10,7 +11,7 @@ from fakes import ROADS_IN_W04, FakeStream, ScriptedBrowser, ScriptedDecider, us
 import app as app_module
 from audio.speaker import Speaker
 from dialogue.decision import Decision, Screening
-from gnani.prisma import SttEvent
+from gnani.prisma import PrismaClosed, PrismaRejected, SttEvent
 from gnani.timbre import TimbreError
 from tickets.store import TicketStore
 
@@ -200,6 +201,77 @@ def test_call_greets_on_connect_then_answers_the_callers_turn(
     assert tts.closed
 
 
+def test_a_dropped_prisma_session_is_replaced_without_greeting_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tts = FakeTts()
+    use_dialogue_fakes(monkeypatch, tts)
+    broken = FakeStream()
+    broken.audio_error = PrismaClosed(1011, "error")
+    streams = [broken, FakeStream()]
+    monkeypatch.setattr(app_module, "stt_stream_factory", lambda settings: streams.pop(0))
+    monkeypatch.setattr(app_module, "STT_RECONNECT_DELAY_S", 0.01)
+    browser = ScriptedBrowser([bytes(1024), bytes(1024)], leave_when=ended_lines(2))
+
+    asyncio.run(app_module.call(browser))
+
+    assert lines_of(browser.sent, "dialogue", "keys") == [["greeting"], ["ask_problem"]]
+    assert not [m for m in browser.sent if isinstance(m, dict) and m["type"] == "error"]
+    assert streams == []
+
+
+def test_a_call_gives_up_when_prisma_keeps_failing(monkeypatch: pytest.MonkeyPatch) -> None:
+    use_dialogue_fakes(monkeypatch, FakeTts())
+    monkeypatch.setattr(app_module, "STT_RECONNECT_DELAY_S", 0.01)
+    attempts = []
+
+    def failing(settings):
+        attempts.append(1)
+        return FakeStream(enter_error=PrismaClosed(1011, "error"))
+
+    monkeypatch.setattr(app_module, "stt_stream_factory", failing)
+    browser = ScriptedBrowser([], leave_when=lambda sent: False)
+
+    asyncio.run(app_module.call(browser))
+
+    assert len(attempts) == app_module.STT_RECONNECTS + 1
+    assert browser.closed_with == 1011
+
+
+def test_a_rejected_key_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    use_dialogue_fakes(monkeypatch, FakeTts())
+    monkeypatch.setattr(app_module, "STT_RECONNECT_DELAY_S", 0.01)
+    attempts = []
+
+    def rejecting(settings):
+        attempts.append(1)
+        return FakeStream(enter_error=PrismaRejected(401))
+
+    monkeypatch.setattr(app_module, "stt_stream_factory", rejecting)
+    browser = ScriptedBrowser([], leave_when=lambda sent: False)
+
+    asyncio.run(app_module.call(browser))
+
+    assert len(attempts) == 1
+    assert browser.closed_with == 1011
+
+
+def test_the_agent_says_okay_as_soon_as_the_caller_finishes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tts = FakeTts()
+    use_dialogue_fakes(monkeypatch, tts)
+    monkeypatch.setattr(app_module, "acknowledge_turns", True)
+    browser = ScriptedBrowser([bytes(1024)], leave_when=ended_lines(3))
+
+    asyncio.run(app_module.call(browser))
+
+    greeting, ack, ask_problem = (
+        app_module.TEMPLATES.lines[k] for k in ("greeting", "ack", "ask_problem")
+    )
+    assert tts.spoken == [greeting, ack, ask_problem]
+
+
 def test_a_whole_call_ends_with_a_ticket(
     monkeypatch: pytest.MonkeyPatch, ticket_store: TicketStore
 ) -> None:
@@ -221,6 +293,44 @@ def test_a_whole_call_ends_with_a_ticket(
     assert (ticket["department"], ticket["ward"]) == ("roads", "w04")
     assert ticket["decider_revision"] == "scripted"
     assert ticket_store.transcript(ticket["call_id"]) == ["ರಸ್ತೆ"]
+
+
+def test_the_ticket_number_is_not_cut_off_by_a_barge_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    class SlowTts(FakeTts):
+        async def stream(self, text: str, voice: str | None = None) -> AsyncIterator[bytes]:
+            self.spoken.append(text)
+            for _ in range(10):
+                await asyncio.sleep(0.05)
+                yield b"\x01\x00"
+
+    use_dialogue_fakes(monkeypatch, SlowTts(), ScriptedDecider(ROADS_IN_W04))
+    # The caller's turn, then a pause (ignored text frames), then a barge-in while the ticket
+    # number is being read back.
+    browser = ScriptedBrowser(
+        [bytes(1024)] + ["wait"] * 30 + ["barge_in"], leave_when=lambda sent: False
+    )
+
+    asyncio.run(app_module.call(browser))
+
+    assert {"type": "agent_audio_end", "interrupted": True} not in browser.sent
+    assert lines_of(browser.sent, "agent_text", "text")[-1] == app_module.TEMPLATES.lines["closing"]
+    assert browser.sent[-1] == {"type": "call_ended", "reason": "ticket"}
+
+
+def test_a_failed_ticket_write_hands_the_call_off(
+    monkeypatch: pytest.MonkeyPatch, ticket_store: TicketStore
+) -> None:
+    use_dialogue_fakes(monkeypatch, FakeTts())
+
+    def locked(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(ticket_store, "record_turn", locked)
+    browser = ScriptedBrowser([bytes(1024)], leave_when=ended_lines(2))
+
+    asyncio.run(app_module.call(browser))
+
+    assert lines_of(browser.sent, "dialogue", "keys")[-1] == ["handoff_unclear"]
 
 
 def test_a_late_prisma_event_during_the_hang_up_is_not_sent(

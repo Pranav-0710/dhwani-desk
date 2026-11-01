@@ -103,7 +103,7 @@ Each turn is decided in two steps, safety first:
 1. The four questions that can end the call at once: danger, how urgent (an emergency counts as danger), a request for a person, not a civic matter.
 2. The rest.
 
-If step 1 calls for a hand-off, the hand-off line is said at once, and step 2 still runs for the officer. Otherwise, if step 2 takes over 0.3 s, the agent says "ಸರಿ, ಒಂದು ಕ್ಷಣ" ("okay, one moment") while it runs. Timings: `docs/decisions/laya-latency.md`.
+If step 1 calls for a hand-off, the hand-off line is said at once, and step 2 still runs for the officer. As soon as a turn ends, before step 1, the agent says "ಸರಿ." ("okay", `acknowledge_turns` in `app.py`), so the caller hears it about 1.5 s after speaking. With that turned off, the agent instead says "ಒಂದು ಕ್ಷಣ" ("one moment") when step 2 takes over 0.3 s. Timings: `docs/decisions/laya-latency.md`.
 
 Before the lines of each reply, the browser gets a `dialogue` message:
 - `keys`: the template keys, in speaking order

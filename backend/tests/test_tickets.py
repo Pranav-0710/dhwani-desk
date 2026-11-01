@@ -89,12 +89,12 @@ def test_transcripts_are_masked_and_deleted_after_the_retention_period(ticket_st
     assert len(ticket_store.tickets()) == 1  # tickets are kept
 
 
-CONSOLE = {"Authorization": "Bearer console-test-token"}
+CONSOLE = {"Authorization": "Bearer console-test-token-0123"}
 
 
 @pytest.fixture
 def console_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings = isolated_settings(console_token="console-test-token")
+    settings = isolated_settings(console_token="console-test-token-0123")
     monkeypatch.setattr(app_module, "get_settings", lambda: settings)
 
 
@@ -202,8 +202,8 @@ def test_a_failed_retention_pass_does_not_stop_later_ones(ticket_store, monkeypa
     [
         {},
         {"Authorization": "Bearer wrong"},
-        {"Authorization": "console-test-token"},
-        {"Authorization": "Basic console-test-token"},
+        {"Authorization": "console-test-token-0123"},
+        {"Authorization": "Basic console-test-token-0123"},
     ],
 )
 def test_the_console_api_needs_the_console_token(ticket_store, console_token, headers) -> None:
@@ -224,6 +224,6 @@ def test_the_console_api_is_off_without_a_token(ticket_store, monkeypatch, route
 
 
 def test_the_bearer_scheme_is_case_insensitive(ticket_store, console_token) -> None:
-    headers = {"Authorization": "bearer  console-test-token "}
+    headers = {"Authorization": "bearer  console-test-token-0123 "}
     with TestClient(app_module.app, headers=headers) as client:
         assert client.get("/api/thresholds").status_code == 200

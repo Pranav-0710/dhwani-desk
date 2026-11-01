@@ -45,3 +45,9 @@ From 2026-10-28 Lakshmi Narasimman is away again, and Jey Pranav is doing the re
 | 2026-10-31 | Jey Pranav | #52 | Barge-in: the caller can talk over the agent; playback stops and the line is cut (#10) |
 | 2026-11-01 | Jey Pranav | #54 | Teaser and demo posts: [X](https://x.com/jey_pranav53258/status/2116867959910191274), [LinkedIn](https://lnkd.in/p/gNMNPkh4) (#20) |
 | 2026-11-01 | Jey Pranav | #55 | Demo video posted on [LinkedIn](https://lnkd.in/p/gNMNPkh4) and [X](https://x.com/jey_pranav53258/status/2116888213851963672); shot list and synthetic caller audio; call 1 moved to a complaint the model does not flag as a hazard (#23) |
+| 2026-11-01 | Jey Pranav | #57 | Docker with Laya: CPU-only PyTorch (no CUDA download), container data paths kept whatever .env says (#56) |
+| 2026-11-01 | Jey Pranav | #58 | Latency measured with the fine-tuned model; the agent says "okay" as soon as a turn ends, first audio about 1.5 s (#22) |
+| 2026-11-01 | Jey Pranav | #60 | A call opens a new Prisma session when one drops mid-call, up to 3 times, without greeting again (#59) |
+| 2026-11-01 | Jey Pranav | #62 | Reconnect follow-up: one microphone per call, retry only recoverable Prisma failures, not after hang-up (#61) |
+| 2026-11-01 | Jey Pranav | #64 | Demo hardening: SQLite side files ignored, port 8080 on localhost only, console token at least 20 characters, rate limits on the token routes (#63) |
+| 2026-11-01 | Jey Pranav | #66 | A failed turn hands the call to an officer instead of going silent; barge-in no longer cuts the ticket number or safety advice (#65) |

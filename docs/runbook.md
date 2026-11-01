@@ -9,7 +9,7 @@ Copy `.env.example` to `.env` at the repo root and fill in:
 | Variable | Needed for |
 | --- | --- |
 | `GNANI_API_KEY` | every call (Prisma and Timbre) |
-| `CONSOLE_TOKEN` | the supervisor console and the tickets API; long and random, e.g. `python -c "import secrets; print(secrets.token_urlsafe(24))"` |
+| `CONSOLE_TOKEN` | the supervisor console and the tickets API; long and random (the backend refuses one under 20 characters), e.g. `python -c "import secrets; print(secrets.token_urlsafe(24))"` |
 | `HF_TOKEN` (read) | the fine-tuned Laya, which `.env.example` turns on (`DECIDER=laya`, `LAYA=1`, `LAYA_CHECKPOINT_REVISION=kn-ft-v1`); set `DECIDER=keyword` and `LAYA=0` to run without it |
 
 `.env` is never copied into an image: compose passes it to the backend when it starts.
@@ -58,6 +58,8 @@ Anyone with the address can reach the app, and every call spends Gnani credits, 
 - **Only allowed pages open calls.** `/ws/stt` and `/ws/call` refuse any page not on `ALLOWED_ORIGINS` (#29).
 - **Two calls at a time** (`MAX_STT_SESSIONS`). One more is told the line is busy, before Prisma is opened.
 - **Silent sockets are hung up** after 30 s without audio, so nobody can hold the line open for free.
+- **Port 8080 is bound to localhost.** Other devices reach the app through the tunnel, not over the local network.
+- **The token routes are rate-limited.** nginx allows 5 requests a second to `/api/` (bursts of 20) and one console connection a second (bursts of 5) per client, keyed on the IP Cloudflare passes in `CF-Connecting-IP`; more get HTTP 429.
 - **The console and the tickets API need `CONSOLE_TOKEN`.** The console sends it in its first message. `/api/tickets` and `/api/thresholds` need it as `Authorization: Bearer <token>`, because tickets hold where callers are.
 - **The backend's port is not published.** Only the console container reaches it.
 

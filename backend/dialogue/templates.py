@@ -18,6 +18,7 @@ SCHEMA_FILE = REPO_ROOT / "data" / "decision_schema.json"
 LINE_KEYS = frozenset(
     {
         "greeting",
+        "ack",
         "hold_on",
         "hand_back",
         "ask_problem",

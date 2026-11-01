@@ -221,3 +221,10 @@ def test_settings_reject_what_is_not_an_origin(origins: str) -> None:
 def test_settings_reject_a_cap_below_one() -> None:
     with pytest.raises(ValidationError, match="MAX_STT_SESSIONS"):
         isolated_settings(max_stt_sessions=0)
+
+
+def test_a_short_console_token_is_refused() -> None:
+    with pytest.raises(ValidationError, match="at least 20 characters"):
+        isolated_settings(console_token="demo")
+    assert isolated_settings(console_token="").console_token.get_secret_value() == ""
+    assert isolated_settings(console_token="x" * 20).console_token.get_secret_value() == "x" * 20

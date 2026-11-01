@@ -28,7 +28,15 @@ from dialogue.machine import Dialogue, OfficerError, Reply, State
 from dialogue.standin import KeywordDecider
 from dialogue.templates import load_templates
 from dialogue.turns import TURN_PAUSE_S, TurnCollector
-from gnani.prisma import PrismaConfig, PrismaError, PrismaStream, SttEvent, load_bias_words
+from gnani.prisma import (
+    PrismaClosed,
+    PrismaConfig,
+    PrismaError,
+    PrismaStream,
+    PrismaUnavailable,
+    SttEvent,
+    load_bias_words,
+)
 from gnani.timbre import TimbreClient, TimbreConfig
 from tickets.store import FIRST_NUMBER, TicketStore
 
@@ -124,10 +132,17 @@ stt_stream_factory: Callable[[Settings], PrismaStream] = create_stt_stream
 tts_client_factory: Callable[[Settings], TimbreClient] = create_tts_client
 turn_pause_s = TURN_PAUSE_S
 # When the rest of a decision takes longer than this after the safety step, the agent says
-# "one moment" (`hold_on`) so the caller is not left in silence.
+# "one moment" (`hold_on`) so the caller is not left in silence. Not said when `ack` is on.
 hold_on_after_s = 0.3
+# Say `ack` ("okay") as soon as a caller's turn ends, before deciding: Laya takes about a second,
+# and without it the caller hears nothing for ~2.8 s (docs/decisions/laya-latency.md).
+acknowledge_turns = True
 # After the last line of a closed call has played, wait this long before hanging up.
 HANG_UP_GRACE_S = 0.5
+# When Prisma drops a session mid-call (it has closed with 1011 and at its own time limit), the
+# call opens a new one this many times before giving up.
+STT_RECONNECTS = 3
+STT_RECONNECT_DELAY_S = 0.5
 # A console must say hello with the token within this long.
 CONSOLE_HELLO_TIMEOUT_S = 5.0
 # Longest a console waits for a call to carry out an officer command (a decision may be
@@ -411,11 +426,13 @@ async def _converse(
                 await asyncio.sleep(hold_on_after_s)
                 speaker.say(TEMPLATES.line("hold_on"))
 
-            timer = asyncio.create_task(hold_on())
+            # After `ack` the caller has heard the agent already; a second filler is too chatty.
+            timer = None if acknowledge_turns else asyncio.create_task(hold_on())
             try:
                 return await asyncio.to_thread(dialogue.decider.decide, transcript, screening)
             finally:
-                timer.cancel()
+                if timer:
+                    timer.cancel()
 
         async def record_turn(personal_id: float) -> None:
             # Off the event loop: a disk write must not stall the audio of other calls.
@@ -518,28 +535,50 @@ async def _converse(
             while True:
                 await work.put(await source.get())
 
+        async def answer_one(item: str | OfficerCommand) -> None:
+            if isinstance(item, OfficerCommand):
+                await obey(item)
+                return
+            turns_before = len(dialogue.turns)
+            if dialogue.hear(item) is not None:
+                if acknowledge_turns:
+                    speaker.say(TEMPLATES.line("ack"))
+                await decide(new_turn=True)
+            elif len(dialogue.turns) > turns_before:
+                # Said while the call was handed off: kept, and masked as if it held a
+                # personal number, since nothing decides on it now.
+                await record_turn(1.0)
+
         async def answer_turns() -> None:
             # Only the decider runs in threads (it may be slow); the dialogue changes here, on
             # the event loop, so a call that ends while a decision is running files nothing.
             while True:
                 item = await work.get()
-                if isinstance(item, OfficerCommand):
-                    await obey(item)
-                    continue
-                turns_before = len(dialogue.turns)
-                if dialogue.hear(item) is not None:
-                    await decide(new_turn=True)
-                elif len(dialogue.turns) > turns_before:
-                    # Said while the call was handed off: kept, and masked as if it held a
-                    # personal number, since nothing decides on it now.
-                    await record_turn(1.0)
+                try:
+                    await answer_one(item)
+                except Exception:
+                    # A failed store or ticket write must not leave the caller in silence with
+                    # this task gone: log it and hand the call to an officer.
+                    logger.exception("Answering a caller turn failed; handing off")
+                    with contextlib.suppress(Exception):
+                        await answer(dialogue.decider_failed())
+
+        def barge_in() -> None:
+            # Only while the agent is asking: once the call is closed or handed off, the lines
+            # left (the ticket number, the safety advice) must be heard in full.
+            if dialogue.state is State.LISTENING:
+                speaker.interrupt()
+
+        greeted: list[bool] = []
 
         async def converse(event: SttEvent) -> None:
             if agent_hung_up.is_set():
                 return  # nothing follows call_ended
             await outbox.json(event.to_client())
             if event.type == "connected":
-                await answer(dialogue.greet())
+                if not greeted:
+                    greeted.append(True)
+                    await answer(dialogue.greet())
             elif event.type == "transcript":
                 turns.add(event.text)
 
@@ -547,15 +586,27 @@ async def _converse(
         background.append(asyncio.create_task(collect(live.commands)))
         background.append(asyncio.create_task(answer_turns()))
         try:
-            final = await _stt_session(
-                websocket,
-                settings,
-                outbox,
-                config,
-                converse,
-                stop=agent_hung_up,
-                on_barge_in=speaker.interrupt,
-            )
+            for attempt in range(STT_RECONNECTS + 1):
+                failures: list[PrismaError] = []
+                final = await _stt_session(
+                    websocket,
+                    settings,
+                    outbox,
+                    config,
+                    converse,
+                    stop=agent_hung_up,
+                    on_barge_in=barge_in,
+                    failures=failures,
+                )
+                # Retry only what a new session can fix: Prisma closing on its own, or a failed
+                # connect. A rejected key or an audio overflow would fail again the same way.
+                recoverable = (final is not None and final[1] == 1000) or any(
+                    isinstance(exc, PrismaClosed | PrismaUnavailable) for exc in failures
+                )
+                if not recoverable or agent_hung_up.is_set() or attempt == STT_RECONNECTS:
+                    break
+                logger.warning("Prisma ended the session mid-call; reconnecting (%d)", attempt + 1)
+                await asyncio.sleep(STT_RECONNECT_DELAY_S)
         finally:
             for task in background:
                 task.cancel()
@@ -580,9 +631,11 @@ async def _stt_session(
     on_event: EventHandler,
     stop: asyncio.Event | None = None,
     on_barge_in: Callable[[], None] | None = None,
+    failures: list[PrismaError] | None = None,
 ) -> FinalMessage | None:
     """Run one Prisma session for this socket. Returns the message to end the session with,
-    or None when the browser left or `stop` was set (the caller has nothing more to send)."""
+    or None when the browser left or `stop` was set (the caller has nothing more to send).
+    A Prisma failure is also appended to `failures`, for a caller deciding whether to retry."""
     try:
         async with stt_stream_factory(settings) as stream:
             await outbox.json(config)
@@ -602,6 +655,8 @@ async def _stt_session(
         return closed, 1000
     except PrismaError as exc:
         logger.warning("STT session failed: %s", exc)
+        if failures is not None:
+            failures.append(exc)
         return {"type": "error", "message": str(exc)}, 1011
     except WebSocketDisconnect:
         return None

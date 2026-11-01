@@ -69,6 +69,7 @@ function setup() {
   let micResolve: ((mic: Mic) => void) | null = null
   let onPcm: ((pcm: Int16Array<ArrayBuffer>) => void) | null = null
   let onLevel: ((rms: number) => void) | undefined
+  let micStarts = 0
   const mic = {
     stopped: false,
     noise: [] as NoiseLevel[],
@@ -82,6 +83,7 @@ function setup() {
     now: () => clock,
     // Mutes as the real mic does with no line noise: the caller's sound becomes silence.
     startMic: (_rate, callback, muted, level) => {
+      micStarts += 1
       onPcm = (pcm) => callback(muted() ? new Int16Array(pcm.length) : pcm)
       onLevel = level
       return new Promise<Mic>((resolve) => (micResolve = resolve))
@@ -95,6 +97,7 @@ function setup() {
     player,
     events,
     mic,
+    micStarts: () => micStarts,
     statuses: () => events.filter((e) => e.type === 'status').map((e) => e.status),
     grantMic: async () => {
       micResolve?.(mic)
@@ -128,6 +131,18 @@ describe('CallClient', () => {
     call.socket.serverSends({ type: 'connected' })
     await call.grantMic()
 
+    expect(call.statuses()).toEqual(['connecting', 'listening'])
+  })
+
+  it('keeps one mic when the server reconnects to Prisma mid-call', async () => {
+    const call = setup()
+    call.socket.serverSends({ type: 'connected' })
+    await call.grantMic()
+    call.socket.serverSends({ type: 'config', sample_rate: 8000, tts_sample_rate: 16000 })
+    call.socket.serverSends({ type: 'connected' })
+    await flush()
+
+    expect(call.micStarts()).toBe(1)
     expect(call.statuses()).toEqual(['connecting', 'listening'])
   })
 
@@ -232,6 +247,17 @@ describe('CallClient', () => {
       // The caller's sound now goes to the server.
       call.speak([5, 6])
       expect(Array.from(new Int16Array(call.socket.sent.at(-1)!))).toEqual([5, 6])
+    })
+
+    it('lets the ticket number and safety advice play once the call is closed or handed off', async () => {
+      for (const state of ['closed', 'handed_off']) {
+        const call = await agentSpeaking()
+        call.socket.serverSends({ type: 'dialogue', state })
+        for (let i = 0; i < 10; i++) call.level(BARGE_IN_RMS * 2)
+
+        expect(call.player.stops).toBe(0)
+        expect(call.socket.texts).toEqual([])
+      }
     })
 
     it("drops the cut line's late audio and does not mute the caller for its tail", async () => {
