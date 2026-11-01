@@ -69,12 +69,12 @@ Held-out test set, spoken, Prisma at 16 kHz ([`eval/reports/test-kn-ft-v1-timbre
 - Phone-line audio costs almost nothing: the 8 kHz noisy line drops macro-F1 by about 0.01.
 - The test audio is synthetic speech, so these numbers measure the line and Prisma, not real callers' voices.
 
-**Latency** ([`docs/decisions/laya-latency.md`](decisions/laya-latency.md)): about 2.8 s from the end of the caller's words to the agent's first audio on a normal turn, against a 1.5 s target. That is Prisma's transcript (about 0.75 s), a 0.6 s pause to let the caller finish, Laya (about 1.1 s, mostly the safety step) and Timbre (about 0.3 s). On the first turn of a call, Prisma's first transcript sometimes took about 12 s.
+**Latency** ([`docs/decisions/laya-latency.md`](decisions/laya-latency.md)): the agent says "ಸರಿ" ("okay") as soon as the caller finishes, about 1.5 s after their last word (the target is 1.5 s). The answer itself follows 3.7 to 6 s after the caller stopped on a busy laptop, about 2.8 s on a quieter run: Prisma's transcript (about 0.75 s), a 0.6 s pause to let the caller finish, Laya (1 to 4 s depending on load, mostly the safety step) and Timbre (about 0.3 s). On the first turn of a call, Prisma's first transcript sometimes took about 12 s.
 
 ## What we would do next
 
 - Train on better Kannada: have native speakers write or fix the training sentences, and add examples of callers asking for a person and of everyday drain and road complaints that are not dangerous.
-- Make the safety step faster (int8, once it keeps the fine-tuned model's answers) and give an immediate acknowledgement when a turn ends.
+- Make the safety step faster (int8, once it keeps the fine-tuned model's answers), so the answer follows the acknowledgement sooner.
 - Test with real voices reading the test set, and on a real phone line (LiveKit).
 
 ## Privacy
