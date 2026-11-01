@@ -164,8 +164,13 @@ export class CallClient {
         this.emitStatus('agent-speaking')
         break
       case 'agent_audio_end':
-        // After a barge-in the caller is talking: do not mute them for the cut line's tail.
-        if (!this.interrupted) this.onAgentAudioEnd()
+        if (message.interrupted) {
+          // The server cut this line for a barge-in. It may be a line that started after
+          // the barge-in left (a race): stop it too, and never mute the caller for its tail.
+          this.cutAgent()
+        } else if (!this.interrupted) {
+          this.onAgentAudioEnd()
+        }
         break
       case 'tts_error':
         this.onEvent({ type: 'error', message: `Agent voice failed: ${message.message}` })
@@ -236,13 +241,20 @@ export class CallClient {
   }
 
   private bargeIn(): void {
+    this.cutAgent()
+    if (this.socket?.readyState === SOCKET_OPEN) this.socket.send('barge_in')
+    // What the caller said while muted, before barge-in could be sure: their first syllables.
+    for (const pcm of this.mic?.takeRecent?.() ?? []) this.sendMic(pcm)
+  }
+
+  /** Stop the agent's line at once and give the caller the line. */
+  private cutAgent(): void {
     this.loudSince = null
     this.interrupted = true
     this.agentSpeaking = false
     this.mutedUntil = 0
     this.player?.stop()
     this.clearListeningTimer()
-    if (this.socket?.readyState === SOCKET_OPEN) this.socket.send('barge_in')
     this.emitStatus('listening')
   }
 

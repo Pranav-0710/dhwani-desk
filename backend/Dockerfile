@@ -1,9 +1,10 @@
 # The backend: FastAPI on port 8000. Build from the repo root (it needs data/ too):
 #   docker build -f backend/Dockerfile .
 # LAYA=1 adds the Laya runtime, for DECIDER=laya.
-FROM python:3.11-slim
+# Base images pinned by digest (the tag kept for reading): a re-pushed tag cannot change a build.
+FROM python:3.11-slim@sha256:673719e071ecf27434fd2635bbd8d00f49f4fdd81f243143438a42ced8bedf60
 
-COPY --from=ghcr.io/astral-sh/uv:0.9.5 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.9.5@sha256:f459f6f73a8c4ef5d69f4e6fbbdb8af751d6fa40ec34b39a1ab469acd6e289b7 /uv /usr/local/bin/uv
 ENV UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1 PYTHONUNBUFFERED=1
 
 WORKDIR /app/backend
