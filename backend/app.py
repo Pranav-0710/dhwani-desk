@@ -124,8 +124,11 @@ stt_stream_factory: Callable[[Settings], PrismaStream] = create_stt_stream
 tts_client_factory: Callable[[Settings], TimbreClient] = create_tts_client
 turn_pause_s = TURN_PAUSE_S
 # When the rest of a decision takes longer than this after the safety step, the agent says
-# "one moment" (`hold_on`) so the caller is not left in silence.
+# "one moment" (`hold_on`) so the caller is not left in silence. Not said when `ack` is on.
 hold_on_after_s = 0.3
+# Say `ack` ("okay") as soon as a caller's turn ends, before deciding: Laya takes about a second,
+# and without it the caller hears nothing for ~2.8 s (docs/decisions/laya-latency.md).
+acknowledge_turns = True
 # After the last line of a closed call has played, wait this long before hanging up.
 HANG_UP_GRACE_S = 0.5
 # When Prisma drops a session mid-call (it has closed with 1011 and at its own time limit), the
@@ -415,11 +418,13 @@ async def _converse(
                 await asyncio.sleep(hold_on_after_s)
                 speaker.say(TEMPLATES.line("hold_on"))
 
-            timer = asyncio.create_task(hold_on())
+            # After `ack` the caller has heard the agent already; a second filler is too chatty.
+            timer = None if acknowledge_turns else asyncio.create_task(hold_on())
             try:
                 return await asyncio.to_thread(dialogue.decider.decide, transcript, screening)
             finally:
-                timer.cancel()
+                if timer:
+                    timer.cancel()
 
         async def record_turn(personal_id: float) -> None:
             # Off the event loop: a disk write must not stall the audio of other calls.
@@ -532,6 +537,8 @@ async def _converse(
                     continue
                 turns_before = len(dialogue.turns)
                 if dialogue.hear(item) is not None:
+                    if acknowledge_turns:
+                        speaker.say(TEMPLATES.line("ack"))
                     await decide(new_turn=True)
                 elif len(dialogue.turns) > turns_before:
                     # Said while the call was handed off: kept, and masked as if it held a

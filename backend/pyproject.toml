@@ -20,10 +20,22 @@ dev = [
 # The Laya runtime, for DECIDER=laya: `uv sync --group laya`. Tests use a stand-in for Laya.
 laya = [
     "laya[onnx]==0.4.6",
+    # Listed so the CPU-only source below applies to it (uv sources apply to direct dependencies).
+    "torch==2.14.1",
 ]
 
 [tool.uv]
 package = false
+
+# Laya pulls in PyTorch. The decider runs on CPU (ONNX), so take PyTorch's CPU-only build: the
+# default one brings several GB of CUDA libraries into the Docker image.
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.ruff]
 line-length = 100
