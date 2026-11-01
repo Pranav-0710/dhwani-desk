@@ -30,6 +30,17 @@ If the safety call is handed off on the first line, as it should be, the console
 
 Take every number from the newest held-out report in `eval/reports/`, never by hand. Say on the slide how the test audio was made (the report's opening line says it).
 
+## Recording without a Kannada speaker
+
+`backend/scripts/demo_caller.py` speaks the caller's lines with a Timbre voice and writes `call1.wav` and `call2.wav`, with silence for the greeting and the agent's replies. Chrome can play such a file as the microphone:
+
+```
+uv run python -m scripts.demo_caller --out ../eval/out/demo
+chrome --use-fake-device-for-media-stream --use-fake-ui-for-media-stream --use-file-for-fake-audio-capture="<path>\eval\out\demo\call1.wav%noloop"
+```
+
+Start the call as soon as the page opens, and say in the video that the caller is a synthetic voice. Prisma's answer to the first line of a call has taken 4 to 12 s in testing (later turns 1.4 to 2 s), so rehearse and cut the wait when editing; `--gap-scale` stretches the silences if the agent is still talking when the next line starts.
+
 ## After recording
 
 - Trim to 60 s, add captions in English for the Kannada lines (the "means" column above).
