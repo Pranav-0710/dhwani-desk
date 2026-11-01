@@ -16,8 +16,8 @@ Follows the script in `docs/PRD.md` ("Demo, posting and submission"). Two calls 
 
 | Time | Screen | Caller says (Kannada, then what it means) | What should happen |
 | --- | --- | --- | --- |
-| 0–8 s | Phone page, full screen, noise on | "ನಮ್ಮ ಮನೆ ಹತ್ತಿರ ಶಾಲೆ ಮುಂದೆ ಚರಂಡಿ ತೆರೆದಿದೆ" (there's an open drain in front of the school near our house) | The greeting plays first; the caller's line shows up as Prisma's transcript |
-| 8–25 s | Split: phone page and console | "ಹೂವಿನಕೇರಿ, ಸರ್ಕಾರಿ ಶಾಲೆ ಹತ್ತಿರ" (Hoovinakeri, near the government school) | The agent asks where it is, then reads back the drainage complaint in Hoovinakeri ward and the ticket number. Zoom on the console: the decision bars for the call fill in, the department chip reads drainage |
+| 0–8 s | Phone page, full screen, noise on | "ಕಸದ ಗಾಡಿ ಒಂದು ವಾರದಿಂದ ಬಂದಿಲ್ಲ" (the garbage truck hasn't come for a week) | The greeting plays first; the caller's line shows up as Prisma's transcript |
+| 8–25 s | Split: phone page and console | "ಹೂವಿನಕೇರಿ, ಸರ್ಕಾರಿ ಶಾಲೆ ಹತ್ತಿರ" (Hoovinakeri, near the government school) | The agent asks where it is, then reads back the garbage complaint in Hoovinakeri ward and the ticket number. Zoom on the console: the decision bars for the call fill in, the department chip reads solid waste |
 | 25–40 s | Split | "ಮಳೆ ಬಂದ ಮೇಲೆ ಕಂಬದಿಂದ ಕರೆಂಟ್ ವೈರ್ ಕೆಳಗೆ ಬಿದ್ದು ಸ್ಪಾರ್ಕ್ ಆಗ್ತಿದೆ, ಕೆರೆಕೋಡಿ ಮೇನ್ ರೋಡ್" (after the rain a live wire fell from the pole and is sparking, Kerekodi main road) | The agent says the safety line (stay away, connecting you to an officer); the console turns the call red with the safety alert. Click **Take over**, type "ದಯವಿಟ್ಟು ಆ ವೈರ್ ಹತ್ತಿರ ಹೋಗಬೇಡಿ, ಸಿಬ್ಬಂದಿ ಬರ್ತಿದ್ದಾರೆ" (please don't go near the wire, the crew is on its way) and **Say**: it is spoken in the agent's voice |
 | 40–52 s | One slide | — | The held-out results from `eval/reports/`: department macro-F1 zero-shot vs fine-tuned, safety recall, the 8 kHz + noise drop; "No LLM in the call path. ₹0 per decision." |
 | 52–60 s | Credits | — | Gnani Prisma (speech to text) and Timbre (voice), Laya (decisions, fine-tuned on Kaggle), the repo link |
@@ -29,6 +29,17 @@ If the safety call is handed off on the first line, as it should be, the console
 ## Slide
 
 Take every number from the newest held-out report in `eval/reports/`, never by hand. Say on the slide how the test audio was made (the report's opening line says it).
+
+## Recording without a Kannada speaker
+
+`backend/scripts/demo_caller.py` speaks the caller's lines with a Timbre voice and writes `call1.wav` and `call2.wav`, with silence for the greeting and the agent's replies. Chrome can play such a file as the microphone:
+
+```
+uv run python -m scripts.demo_caller --out ../eval/out/demo
+chrome --use-fake-device-for-media-stream --use-fake-ui-for-media-stream --use-file-for-fake-audio-capture="<path>\eval\out\demo\call1.wav%noloop"
+```
+
+Start the call as soon as the page opens, and say in the video that the caller is a synthetic voice. Prisma's answer to the first line of a call has taken 4 to 12 s in testing (later turns 1.4 to 2 s), so rehearse and cut the wait when editing; `--gap-scale` stretches the silences if the agent is still talking when the next line starts.
 
 ## After recording
 
