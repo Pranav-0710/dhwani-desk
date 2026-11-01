@@ -69,18 +69,20 @@ Then tag that commit, set `LAYA_CHECKPOINT_REVISION` to the tag and `DECIDER=lay
 
 ## End of caller speech to first agent audio (#22)
 
-Measured with `scripts.call_smoke` against the fine-tuned checkpoint (`kn-ft-v1`) on the laptop, with background apps running. The caller's lines are Timbre voices, so this is the pipeline's time, not a human's. The figure is taken from the end of the caller's words; the script then sends 1.5 s of silence so Prisma closes the segment.
+Measured on 2026-11-01 with `scripts.call_smoke` against the fine-tuned checkpoint (`kn-ft-v1`, `DECIDER=laya`, `LAYA_THREADS=8`) on the laptop, CPU about 30% busy with other apps. Four calls, each a garbage complaint and then a place ("ಕಸದ ಗಾಡಿ ಒಂದು ವಾರದಿಂದ ಬಂದಿಲ್ಲ", "ಗಾಂಧಿನಗರ ಸರ್ಕಾರಿ ಆಸ್ಪತ್ರೆ ಹತ್ತಿರ"). The caller is a Timbre voice; the time is taken from the end of the caller's words.
 
-| Line the agent says | First audio after the caller stopped |
+| Turn | First agent audio after the caller stopped |
 | --- | --- |
-| A question (cached after the first call) | 2.0–2.2 s |
-| The same, first call after start-up | 3.3 s |
-| The ticket read-back (ticket number and ward, so Timbre every time) | 2.6–2.75 s |
+| Second turn (the ward, then the ticket read-back) | 2.74, 2.82, 3.00, 2.99 s |
+| First turn ("one moment", then the question) | 2.2 s in one call; 12.2 to 12.7 s in the other three |
 
-Where the time goes, for a cached question: Prisma returns the transcript about 1.4 s after the words end (the segment closing), the turn collector waits `TURN_PAUSE_S` = 0.6 s for more of the sentence, the decision takes about 0.6 s with the 0.6 s pause counted in, and a cached line then starts at once. A line sent to Timbre adds about 1.1 s.
+Where the time goes on the second turn: Prisma returns the transcript about 0.75 s after the words end, the turn collector waits `TURN_PAUSE_S` = 0.6 s, Laya's safety step and decision take about 1.1 s, and Timbre starts the ticket line in about 0.3 s.
 
-The ≤ 1.5 s target is not met. Most of the gap is Prisma's segment closing, which the backend does not control. What the backend can change:
+On the first turn, three calls out of four waited about 12 s for Prisma's transcript of the caller's first line; the fourth got it in about 3 s. In those calls the caller started speaking within a second of the session opening. Later turns never waited like this.
 
-- Shorten `TURN_PAUSE_S`. It costs the full pause on every turn, but a shorter one risks cutting a caller's sentence into two turns and two replies. Tune it only against real callers.
-- Keep a rehearsal call before any demo: the first call after start-up speaks every fixed line through Timbre.
-- Split the ticket line into a cached part and a short number part.
+The ≤ 1.5 s target is not met: about 2.8 s on a normal turn. What would close the gap, in order of effect:
+
+- **A faster safety step.** It is most of Laya's 1.1 s. int8 quantization halved the time on the base checkpoint but changed answers; test it again on the fine-tuned checkpoint against the test set.
+- **An acknowledgement as soon as the turn ends.** `hold_on` ("one moment") plays only when the decision runs 0.3 s past the safety step. Saying a cached short line as soon as the turn ends would put first audio at about 1.4 s, but the caller then hears filler on every turn.
+- **A shorter `TURN_PAUSE_S`.** Saves up to 0.6 s per turn, at the risk of cutting a caller who pauses mid-sentence into two turns. Tune only against real callers.
+- **The slow first transcript.** Check with Gnani whether a new Prisma session needs a moment before speech; the backend could open the session before the greeting finishes.
