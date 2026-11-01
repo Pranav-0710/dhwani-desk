@@ -80,9 +80,19 @@ Where the time goes on the second turn: Prisma returns the transcript about 0.75
 
 On the first turn, three calls out of four waited about 12 s for Prisma's transcript of the caller's first line; the fourth got it in about 3 s. In those calls the caller started speaking within a second of the session opening. Later turns never waited like this.
 
-The ≤ 1.5 s target is not met: about 2.8 s on a normal turn. What would close the gap, in order of effect:
+Without an acknowledgement, the caller heard nothing for about 2.8 s after a normal turn, against a 1.5 s target.
 
-- **A faster safety step.** It is most of Laya's 1.1 s. int8 quantization halved the time on the base checkpoint but changed answers; test it again on the fine-tuned checkpoint against the test set.
-- **An acknowledgement as soon as the turn ends.** `hold_on` ("one moment") plays only when the decision runs 0.3 s past the safety step. Saying a cached short line as soon as the turn ends would put first audio at about 1.4 s, but the caller then hears filler on every turn.
+### With an acknowledgement (`acknowledge_turns`)
+
+The agent now says a cached "ಸರಿ." ("okay") as soon as a turn ends, before Laya decides; the slow-decision "ಒಂದು ಕ್ಷಣ." ("one moment") is then not said, so the caller hears one short filler, not two. Four calls, same lines, same machine (busier this time):
+
+| | After the caller stopped |
+| --- | --- |
+| First agent audio ("ಸರಿ.") | 1.51, 1.60, 1.63, 2.03 s |
+| The answer itself (question or ticket read-back) | 3.7 to 6.0 s |
+
+So first audio is at the 1.5 s target, give or take 0.1 s, and the caller is not left in silence. The answer itself still waits for Laya, which took 2 to 4 s per decision in this run (about 1.1 s in the earlier one; the laptop was busier). What would bring the answer closer:
+
+- **A faster safety step.** It is most of Laya's time. int8 quantization halved the time on the base checkpoint but changed answers; test it again on the fine-tuned checkpoint against the test set.
 - **A shorter `TURN_PAUSE_S`.** Saves up to 0.6 s per turn, at the risk of cutting a caller who pauses mid-sentence into two turns. Tune only against real callers.
 - **The slow first transcript.** Check with Gnani whether a new Prisma session needs a moment before speech; the backend could open the session before the greeting finishes.
