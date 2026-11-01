@@ -10,7 +10,7 @@ from fakes import ROADS_IN_W04, FakeStream, ScriptedBrowser, ScriptedDecider, us
 import app as app_module
 from audio.speaker import Speaker
 from dialogue.decision import Decision, Screening
-from gnani.prisma import SttEvent
+from gnani.prisma import PrismaError, SttEvent
 from gnani.timbre import TimbreError
 from tickets.store import TicketStore
 
@@ -198,6 +198,43 @@ def test_call_greets_on_connect_then_answers_the_callers_turn(
     assert lines_of(browser.sent, "agent_text", "text") == [greeting, ask_problem]
     assert tts.spoken == [greeting, ask_problem]
     assert tts.closed
+
+
+def test_a_dropped_prisma_session_is_replaced_without_greeting_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tts = FakeTts()
+    use_dialogue_fakes(monkeypatch, tts)
+    broken = FakeStream()
+    broken.audio_error = PrismaError("Prisma closed the session abnormally: 1011 error")
+    streams = [broken, FakeStream()]
+    monkeypatch.setattr(app_module, "stt_stream_factory", lambda settings: streams.pop(0))
+    monkeypatch.setattr(app_module, "STT_RECONNECT_DELAY_S", 0.01)
+    browser = ScriptedBrowser([bytes(1024), bytes(1024)], leave_when=ended_lines(2))
+
+    asyncio.run(app_module.call(browser))
+
+    assert lines_of(browser.sent, "dialogue", "keys") == [["greeting"], ["ask_problem"]]
+    assert not [m for m in browser.sent if isinstance(m, dict) and m["type"] == "error"]
+    assert streams == []
+
+
+def test_a_call_gives_up_when_prisma_keeps_failing(monkeypatch: pytest.MonkeyPatch) -> None:
+    use_dialogue_fakes(monkeypatch, FakeTts())
+    monkeypatch.setattr(app_module, "STT_RECONNECT_DELAY_S", 0.01)
+    attempts = []
+
+    def failing(settings):
+        attempts.append(1)
+        return FakeStream(enter_error=PrismaError("Prisma closed the session abnormally"))
+
+    monkeypatch.setattr(app_module, "stt_stream_factory", failing)
+    browser = ScriptedBrowser([], leave_when=lambda sent: False)
+
+    asyncio.run(app_module.call(browser))
+
+    assert len(attempts) == app_module.STT_RECONNECTS + 1
+    assert browser.closed_with == 1011
 
 
 def test_the_agent_says_okay_as_soon_as_the_caller_finishes(

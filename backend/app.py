@@ -131,6 +131,10 @@ hold_on_after_s = 0.3
 acknowledge_turns = True
 # After the last line of a closed call has played, wait this long before hanging up.
 HANG_UP_GRACE_S = 0.5
+# When Prisma drops a session mid-call (it has closed with 1011 and at its own time limit), the
+# call opens a new one this many times before giving up.
+STT_RECONNECTS = 3
+STT_RECONNECT_DELAY_S = 0.5
 # A console must say hello with the token within this long.
 CONSOLE_HELLO_TIMEOUT_S = 5.0
 # Longest a console waits for a call to carry out an officer command (a decision may be
@@ -541,12 +545,16 @@ async def _converse(
                     # personal number, since nothing decides on it now.
                     await record_turn(1.0)
 
+        greeted: list[bool] = []
+
         async def converse(event: SttEvent) -> None:
             if agent_hung_up.is_set():
                 return  # nothing follows call_ended
             await outbox.json(event.to_client())
             if event.type == "connected":
-                await answer(dialogue.greet())
+                if not greeted:
+                    greeted.append(True)
+                    await answer(dialogue.greet())
             elif event.type == "transcript":
                 turns.add(event.text)
 
@@ -554,15 +562,20 @@ async def _converse(
         background.append(asyncio.create_task(collect(live.commands)))
         background.append(asyncio.create_task(answer_turns()))
         try:
-            final = await _stt_session(
-                websocket,
-                settings,
-                outbox,
-                config,
-                converse,
-                stop=agent_hung_up,
-                on_barge_in=speaker.interrupt,
-            )
+            for attempt in range(STT_RECONNECTS + 1):
+                final = await _stt_session(
+                    websocket,
+                    settings,
+                    outbox,
+                    config,
+                    converse,
+                    stop=agent_hung_up,
+                    on_barge_in=speaker.interrupt,
+                )
+                if final is None or final[1] not in (1000, 1011) or attempt == STT_RECONNECTS:
+                    break
+                logger.warning("Prisma ended the session mid-call; reconnecting (%d)", attempt + 1)
+                await asyncio.sleep(STT_RECONNECT_DELAY_S)
         finally:
             for task in background:
                 task.cancel()
