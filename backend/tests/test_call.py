@@ -10,7 +10,7 @@ from fakes import ROADS_IN_W04, FakeStream, ScriptedBrowser, ScriptedDecider, us
 import app as app_module
 from audio.speaker import Speaker
 from dialogue.decision import Decision, Screening
-from gnani.prisma import PrismaError, SttEvent
+from gnani.prisma import PrismaClosed, PrismaRejected, SttEvent
 from gnani.timbre import TimbreError
 from tickets.store import TicketStore
 
@@ -206,7 +206,7 @@ def test_a_dropped_prisma_session_is_replaced_without_greeting_again(
     tts = FakeTts()
     use_dialogue_fakes(monkeypatch, tts)
     broken = FakeStream()
-    broken.audio_error = PrismaError("Prisma closed the session abnormally: 1011 error")
+    broken.audio_error = PrismaClosed(1011, "error")
     streams = [broken, FakeStream()]
     monkeypatch.setattr(app_module, "stt_stream_factory", lambda settings: streams.pop(0))
     monkeypatch.setattr(app_module, "STT_RECONNECT_DELAY_S", 0.01)
@@ -226,7 +226,7 @@ def test_a_call_gives_up_when_prisma_keeps_failing(monkeypatch: pytest.MonkeyPat
 
     def failing(settings):
         attempts.append(1)
-        return FakeStream(enter_error=PrismaError("Prisma closed the session abnormally"))
+        return FakeStream(enter_error=PrismaClosed(1011, "error"))
 
     monkeypatch.setattr(app_module, "stt_stream_factory", failing)
     browser = ScriptedBrowser([], leave_when=lambda sent: False)
@@ -234,6 +234,24 @@ def test_a_call_gives_up_when_prisma_keeps_failing(monkeypatch: pytest.MonkeyPat
     asyncio.run(app_module.call(browser))
 
     assert len(attempts) == app_module.STT_RECONNECTS + 1
+    assert browser.closed_with == 1011
+
+
+def test_a_rejected_key_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    use_dialogue_fakes(monkeypatch, FakeTts())
+    monkeypatch.setattr(app_module, "STT_RECONNECT_DELAY_S", 0.01)
+    attempts = []
+
+    def rejecting(settings):
+        attempts.append(1)
+        return FakeStream(enter_error=PrismaRejected(401))
+
+    monkeypatch.setattr(app_module, "stt_stream_factory", rejecting)
+    browser = ScriptedBrowser([], leave_when=lambda sent: False)
+
+    asyncio.run(app_module.call(browser))
+
+    assert len(attempts) == 1
     assert browser.closed_with == 1011
 
 

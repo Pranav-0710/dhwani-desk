@@ -81,6 +81,9 @@ const browserDeps: CallDeps = {
 export class CallClient {
   private socket: CallSocket | null = null
   private mic: Mic | null = null
+  // Set once the mic is asked for: the server sends `connected` again when it replaces a dropped
+  // Prisma session, and a second mic would send the caller's audio twice.
+  private micRequested = false
   private player: Player | null = null
   private agentSpeaking = false
   private mutedUntil = 0
@@ -135,6 +138,8 @@ export class CallClient {
         this.micRate = message.sample_rate
         break
       case 'connected':
+        if (this.micRequested) break
+        this.micRequested = true
         if (await this.openMic()) this.emitStatus('listening')
         break
       case 'transcript':
