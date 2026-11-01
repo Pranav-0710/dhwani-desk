@@ -9,7 +9,7 @@ import pytest
 from fakes import ROADS_IN_W04, FakeStream, ScriptedBrowser, ScriptedDecider, use_fakes
 
 import app as app_module
-from audio.speaker import Speaker
+from audio.speaker import TTS_FAILED, Speaker
 from dialogue.decision import Decision, Screening
 from gnani.prisma import PrismaClosed, PrismaRejected, SttEvent
 from gnani.timbre import TimbreError
@@ -70,7 +70,7 @@ def test_speaker_frames_each_line_and_survives_a_tts_failure() -> None:
     assert outbox.sent == [
         {"type": "agent_text", "text": "broken"},
         {"type": "agent_audio_start", "sample_rate": 16000},
-        {"type": "tts_error", "message": "Timbre SERVICE_UNAVAILABLE: busy (HTTP 503)"},
+        {"type": "tts_error", "message": TTS_FAILED},
         {"type": "agent_audio_end"},
         {"type": "agent_text", "text": "ಸರಿ"},
         {"type": "agent_audio_start", "sample_rate": 16000},
@@ -542,7 +542,7 @@ def test_unexpected_tts_failure_still_ends_the_line_and_keeps_going() -> None:
     assert outbox.sent[:4] == [
         {"type": "agent_text", "text": "bad"},
         {"type": "agent_audio_start", "sample_rate": 16000},
-        {"type": "tts_error", "message": "KeyError"},
+        {"type": "tts_error", "message": TTS_FAILED},
         {"type": "agent_audio_end"},
     ]
     assert outbox.sent[4] == {"type": "agent_text", "text": "ಸರಿ"}
@@ -556,10 +556,7 @@ def test_call_reports_tts_error_and_keeps_the_call_open(monkeypatch: pytest.Monk
 
     asyncio.run(app_module.call(browser))
 
-    assert {
-        "type": "tts_error",
-        "message": "Timbre SERVICE_UNAVAILABLE: busy (HTTP 503)",
-    } in browser.sent
+    assert {"type": "tts_error", "message": TTS_FAILED} in browser.sent
     # The failed greeting is not cached, and the call still answers the caller's turn.
     assert tts.spoken == [app_module.TEMPLATES.lines["ask_problem"]]
     assert browser.closed_with is None  # the browser left; the server never closed the call
