@@ -145,6 +145,21 @@ describe('CallClient', () => {
     expect(call.statuses().at(-1)).toBe('agent-speaking')
   })
 
+  it('does not say listening when the mic opens while a sent greeting still plays', async () => {
+    const call = setup()
+    call.socket.serverSends({ type: 'connected' })
+    call.socket.serverSends({ type: 'agent_audio_start', sample_rate: 16000 })
+    call.player.queued = 4 // a cached line arrives far faster than it plays
+    call.socket.serverSends({ type: 'agent_audio_end' })
+    await call.grantMic()
+
+    expect(call.statuses().at(-1)).toBe('agent-speaking')
+
+    call.player.queued = 0
+    call.advance(4300)
+    expect(call.statuses().at(-1)).toBe('listening')
+  })
+
   it('keeps one mic when the server reconnects to Prisma mid-call', async () => {
     const call = setup()
     call.socket.serverSends({ type: 'connected' })
@@ -228,9 +243,9 @@ describe('CallClient', () => {
     expect(call.mic.noise).toEqual(['heavy', 'off'])
   })
 
-  it('does not print empty brackets when Prisma closes without a reason', () => {
+  it('says the speech service ended the call when Prisma closes it', () => {
     const call = setup()
-    call.socket.serverSends({ type: 'closed', reason: '' })
+    call.socket.serverSends({ type: 'closed' })
 
     expect(call.events.at(-1)).toEqual({ type: 'error', message: 'Speech service ended the call' })
   })

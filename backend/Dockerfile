@@ -29,4 +29,5 @@ EXPOSE 8000
 # A first start with DECIDER=laya downloads the checkpoint (about 1.3 GB) before /health answers.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=600s --retries=3 \
     CMD ["/app/backend/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
-CMD ["/app/backend/.venv/bin/uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+# uvicorn would otherwise take a 16 MiB frame from anyone, before any check of ours has run.
+CMD ["sh", "-c", "exec /app/backend/.venv/bin/uvicorn app:app --host 0.0.0.0 --port 8000 --ws-max-size \"${WS_MAX_FRAME_BYTES:-65536}\""]

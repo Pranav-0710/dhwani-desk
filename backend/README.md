@@ -31,15 +31,17 @@ uv run pytest -q
 
 ## Speech-to-text (Prisma)
 
-`/ws/stt` relays browser audio to Gnani Prisma and transcripts back.
+`/ws/stt` relays browser audio to Gnani Prisma and transcripts back. No page uses it, so it is off (refused with HTTP 403) unless `STT_RELAY_ENABLED=true`: left on behind a tunnel it is free speech-to-text on our key.
 
-Who may connect, to `/ws/stt` and `/ws/call` alike (every session spends Gnani credits):
+Who may connect, to `/ws/stt` and `/ws/call` alike (every session spends Gnani credits; threats and what is left: `docs/decisions/security-model.md`):
 
 - **Only pages on `ALLOWED_ORIGINS`.** Browsers apply no CORS to WebSockets, so the server checks the `Origin` header itself before accepting. Any other page, or no `Origin` at all, is refused with HTTP 403 at the handshake. The default lets in the Vite dev server (`http://localhost:5173`, `http://127.0.0.1:5173`); add the tunnel's address when the phone page is served from it, e.g. `ALLOWED_ORIGINS=http://localhost:5173,https://hosapura.example.com`.
 - **At most `MAX_STT_SESSIONS` at once** (default 2), counted across both sockets. One more gets `error` ("The line is busy…") and a 1013 close, before Prisma is opened. The count is per process: `uvicorn --workers N` would allow N times as many.
-- **A session that sends no audio for 30 s is ended** with `error` and a 1008 close, so a socket left open and silent cannot hold a place. The phone page streams all the time, silence included. A phone that loses signal without closing keeps its place until uvicorn's ping gives up, about 40 s.
+- **Within the credit ceiling.** Once the lines have been used for `MAX_CALL_MINUTES_PER_DAY` minutes (default 240) in a rolling 24 hours, or a caller has started `MAX_CALLS_PER_CLIENT_PER_HOUR` calls (default 30) in a rolling hour, a new session gets `error` ("The helpline has taken all the calls it can…") and a 1013 close, before Prisma is opened. A call in progress is counted when it ends, and is never cut. 0 turns either off. Counted in memory, per process: a restart starts them afresh. A caller is an IP address, or an IPv6 /64.
+- **A session that sends too little audio over 30 s is ended** with `error` and a 1008 close, so a socket left open and silent, or sending a byte now and then, cannot hold a place. Too little is under `MIN_AUDIO_SHARE` (default 0.25) of real time, or none at all, checked every 30 s from the first audio. The phone page streams all the time, silence included, and its first audio may wait for the browser's permission prompt. A phone that loses signal without closing keeps its place until uvicorn's ping gives up, about 40 s.
+- **A session ends after 10 minutes**, with `error` and a 1008 close. On `/ws/call` that is for the whole call, across any new Prisma sessions.
 
-A script can forge `Origin`, so the first rule only stops other web pages; the cap is what bounds a script that has the URL.
+A script can forge `Origin`, so the first rule only stops other web pages; the caps and the ceiling are what bound a script that has the URL. In the Docker image, uvicorn also closes (1009) any socket sending a frame over `WS_MAX_FRAME_BYTES` (default 65536).
 
 Session contract:
 
@@ -48,12 +50,12 @@ Session contract:
 3. Optional text frame `flush` pushes out a trailing partial frame.
 4. Server → client events: `processing`, `transcript` (`text`, `segment_index`, `audio_duration_ms`, `latency_ms`), `settings_updated`.
 5. The session ends with one of:
-   - `closed` (`by: "prisma"`, `code`, `reason`) and a 1000 close — Prisma ended it cleanly (e.g. its 15-minute cap); reconnect for a new session.
+   - `closed` (`by: "prisma"`, `code`) and a 1000 close — Prisma ended it cleanly (e.g. its 15-minute cap); reconnect for a new session.
    - `error` (`message`) and a 1011 close — missing key, rejected key, Prisma unreachable or failed, or audio not sent in real time.
-   - `error` (`message`) and a 1013 close — the line is busy (`MAX_STT_SESSIONS`); try again later.
-   - `error` (`message`) and a 1008 close — no audio for 30 s.
+   - `error` (`message`) and a 1013 close — the line is busy (`MAX_STT_SESSIONS`), or the credit ceiling is reached; try again later.
+   - `error` (`message`) and a 1008 close — too little audio over 30 s, or the time limit.
 
-   A Prisma `error` event that is *not* followed by a close is recoverable; the session continues.
+   A Prisma `error` event that is *not* followed by a close is recoverable; the session continues. The browser gets a fixed `message`. Prisma's own text, here and in its close reason, may name the account or its quota, so it only goes to the log.
 
 Smoke test against the live API (needs `GNANI_API_KEY` in the repo-root `.env`):
 
@@ -131,16 +133,25 @@ The phone page in `console/` is the browser side of this route. To try a call wi
 
 The console watches every live call and lets an officer step in (`dialogue/live.py`). It is off until `CONSOLE_TOKEN` is set, because it can speak to callers.
 
-1. The console's first message is `{"type": "hello", "token": "<CONSOLE_TOKEN>"}`, within 5 s. A wrong or missing token gets `error` and a close with 1008.
+Who may connect, each refused with HTTP 403 at the handshake:
+- **Only pages on `ALLOWED_ORIGINS`**, as for the call sockets.
+- **Up to `MAX_CONSOLE_HELLOS` sockets (default 16) yet to say hello, `MAX_CONSOLE_HELLOS_PER_CLIENT` (default 2) from one caller.** Counted apart from signed-in consoles, so strangers cannot lock an officer out.
+- **Not through the tunnel, if `CONSOLE_LOCAL_ONLY=true`.** A request carrying `CF-Connecting-IP` came through Cloudflare; the socket refuses it, and `/api/*` answers 404, whatever the token.
+
+Then:
+
+1. The console's first message is `{"type": "hello", "token": "<CONSOLE_TOKEN>"}`, within 5 s and at most 4096 characters. A wrong or missing token gets `error` and a close with 1008. A valid one past `MAX_CONSOLES` (default 8) gets `error` and a close with 1013. Each sign-in is logged at WARNING with its address.
 2. It then gets `calls`: every live call (`call_id`, `started_at`, `state`, `reason`, `officer`, `slots`) and the escalation `thresholds` for the decision bars (also at `GET /api/thresholds`, from `decisions/thresholds.py`).
 3. As things happen: `call_started` (the same fields), `call_event` (`call_id`, and `event`: every JSON message that call's browser got, as listed above; no audio) and `call_closed` (`call_id`).
+
+Consoles see the caller's words masked, in `transcript` events and in `turns`: any run of four or more digits or digit words, as if a personal number had been said, since no decision says otherwise yet. Recent segments are masked together, so a number spread over them is caught from the piece that makes it four digits. The caller's own browser gets the words as Prisma wrote them. Agent lines are not masked: they come from the templates or from an officer, never from what the caller said.
 
 Commands, each with a `call_id` and an optional `id` that is echoed back:
 
 | Command | Does | Allowed when |
 | --- | --- | --- |
 | `take_over` | The officer has the call; the agent stays quiet. A call the agent was still handling is handed off with reason `taken_over`. | the call is not closed |
-| `say` (`text`) | The agent's voice says the officer's text (up to 300 characters) | the officer has taken the call |
+| `say` (`text`) | The agent's voice says the officer's text (up to 300 characters) | the officer has taken the call, and under `MAX_OFFICER_LINES_QUEUED` lines (default 5) are waiting |
 | `hand_back` | The agent says "ಕಾಯ್ದಿದ್ದಕ್ಕೆ ಧನ್ಯವಾದ…" and decides on everything the caller said, including to the officer | the call is handed off |
 
 Each command is answered with `done` or `error` (`message`), plus `command`, `call_id` and `id`. A command the console stops waiting for (after 10 s, or because it disconnected) is cancelled and never carried out later, so an officer who tries again is not heard twice.
@@ -157,14 +168,14 @@ When the agent closes a call with a ticket, it is stored in SQLite (`DATABASE_UR
 | --- | --- |
 | `number` | Ticket number read back to the caller, from 1001 |
 | `department`, `ward`, `urgency` | The routing decision. `ward` is a ward id or `unknown` |
-| `location_text` | The caller's own words for where the problem is (the turns that gave the place or named the ward), masked |
+| `location_text` | The caller's own words for where the problem is (the turns that gave the place or named the ward), masked; empty after the retention below |
 | `repeat_complaint`, `status` | Repeat flag; `open` until someone closes it |
 | `decision`, `decider_revision` | Every answer behind the ticket with its probability, and which decider made it (`keyword-standin-1`, or `laya:<repo>@<commit>`) |
 | `call_id`, `created_at` | Links the ticket to its caller turns; UTC timestamp |
 
 Two rules protect callers:
 - **Masking:** caller turns are stored masked in `transcripts`. Before anything is written, every run of 10 or more digits (phone, Aadhaar, account) is replaced with X. When the decider thinks a personal ID was said, runs of 4 or more digits are masked too.
-- **Retention:** turns older than `TRANSCRIPT_RETENTION_DAYS` (default 7) are deleted at startup and every hour after. Tickets are kept.
+- **Retention:** turns older than `TRANSCRIPT_RETENTION_DAYS` (default 7) are deleted at startup and every hour after. Tickets are kept, but `location_text` is blanked on those older than `TICKET_LOCATION_RETENTION_DAYS` (default 30), in the same sweep.
 
 Read-only API for the console. Each request needs the console's token, `Authorization: Bearer <CONSOLE_TOKEN>` (401 without it, 503 while `CONSOLE_TOKEN` is unset), as does `GET /api/thresholds`:
 - `GET /api/tickets?limit=50`: newest first, `limit` from 1 to 500.

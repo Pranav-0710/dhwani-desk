@@ -99,6 +99,43 @@ def test_transcripts_are_masked_and_deleted_after_the_retention_period(ticket_st
     assert len(ticket_store.tickets()) == 1  # tickets are kept
 
 
+def test_a_tickets_location_is_blanked_after_its_retention_and_the_ticket_stays(
+    ticket_store: TicketStore,
+) -> None:
+    ticket_store.file(request())
+    words = ticket_store.tickets()[0]["location_text"]
+    assert words
+
+    assert ticket_store.purge_ticket_locations(30) == 0  # nothing is old yet
+    assert ticket_store.tickets()[0]["location_text"] == words
+
+    later = datetime.now(UTC) + timedelta(days=31)
+    assert ticket_store.purge_ticket_locations(30, at=later) == 1
+    (ticket,) = ticket_store.tickets()
+    assert ticket["location_text"] == ""
+    assert ticket["department"] and ticket["decision"]  # what the field team needs stays
+
+    assert ticket_store.purge_ticket_locations(30, at=later) == 0  # blanked once
+
+
+def test_the_retention_sweep_blanks_old_ticket_locations(ticket_store, monkeypatch) -> None:
+    ticket_store.file(request())
+    settings = isolated_settings(ticket_location_retention_days=30)
+    monkeypatch.setattr(app_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        ticket_store,
+        "purge_ticket_locations",
+        lambda days: TicketStore.purge_ticket_locations(
+            ticket_store, days, at=datetime.now(UTC) + timedelta(days=days + 1)
+        ),
+    )
+
+    with TestClient(app_module.app):
+        pass
+
+    assert ticket_store.tickets()[0]["location_text"] == ""
+
+
 CONSOLE = {"Authorization": "Bearer console-test-token-0123"}
 
 

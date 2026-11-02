@@ -8,8 +8,10 @@ from fakes import PHONE_ORIGIN, FakeStream, ScriptedBrowser, isolated_settings
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from starlette.websockets import WebSocketDisconnect
+from test_call import FakeTts
 
 import app as app_module
+from config import BACKEND_DIR, Settings
 from gnani.prisma import PrismaRejected
 
 TUNNEL = "https://hosapura-demo.trycloudflare.com"
@@ -186,8 +188,9 @@ class PacedBrowser(ScriptedBrowser):
 def test_steady_audio_keeps_the_session_open(monkeypatch: pytest.MonkeyPatch) -> None:
     use_settings(monkeypatch)
     monkeypatch.setattr(app_module, "stt_quiet_s", 0.2)
-    # A frame every 50 ms for well past the limit, as the phone page sends, silence or not.
-    browser = PacedBrowser([bytes(160)] * 10)
+    # A frame of 8 kHz audio every 50 ms for well past the limit, as the phone page streams,
+    # silence or not. Each is enough on its own, so a slow timer here cannot fail the test.
+    browser = PacedBrowser([bytes(1600)] * 10)
     started = time.monotonic()
 
     asyncio.run(app_module.stt_proxy(browser))
@@ -195,6 +198,243 @@ def test_steady_audio_keeps_the_session_open(monkeypatch: pytest.MonkeyPatch) ->
     assert time.monotonic() - started > 2 * app_module.stt_quiet_s  # the limit was tested
     assert app_module.WENT_QUIET not in browser.sent
     assert browser.closed_with is None  # the browser left; the server never hung up
+
+
+def test_a_byte_now_and_then_does_not_keep_the_session_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    use_settings(monkeypatch)
+    monkeypatch.setattr(app_module, "stt_quiet_s", 0.2)
+    # Often enough to have reset the limit every time while any audio at all did.
+    browser = PacedBrowser([b"\x00"] * 40, leave_when=lambda sent: False)
+
+    asyncio.run(app_module.stt_proxy(browser))
+
+    assert browser.sent[-1] == app_module.WENT_QUIET
+    assert browser.closed_with == 1008
+
+
+def test_a_slow_permission_prompt_does_not_end_the_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    use_settings(monkeypatch)
+    monkeypatch.setattr(app_module, "stt_quiet_s", 0.5)
+
+    class AnswersThePromptLate(PacedBrowser):
+        waited = False
+
+        async def receive(self) -> dict:
+            # The mic opens shortly before the limit, with too little audio by then to count.
+            if not self.waited:
+                self.waited = True
+                await asyncio.sleep(0.3)
+            return await super().receive()
+
+    browser = AnswersThePromptLate([bytes(640)] * 12)
+
+    asyncio.run(app_module.stt_proxy(browser))
+
+    assert app_module.WENT_QUIET not in browser.sent
+    assert browser.closed_with is None
+
+
+def test_the_raw_relay_is_off_unless_it_is_turned_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("STT_RELAY_ENABLED", raising=False)
+    assert Settings(_env_file=None).stt_relay_enabled is False
+
+    streams = use_settings(monkeypatch, stt_relay_enabled=False)
+    browser = ScriptedBrowser([])
+
+    asyncio.run(app_module.stt_proxy(browser))
+
+    assert not browser.accepted
+    assert browser.closed_with == 1008
+    assert browser.sent == []
+    assert streams == []  # Prisma never opened: no credits spent
+
+
+def test_the_phone_page_still_calls_with_the_raw_relay_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    streams = use_settings(monkeypatch, stt_relay_enabled=False)
+    monkeypatch.setattr(app_module, "tts_client_factory", lambda settings: FakeTts())
+    browser = ScriptedBrowser([], leave_when=connected)
+
+    asyncio.run(app_module.call(browser))
+
+    assert browser.accepted
+    assert connected(browser.sent)
+    assert len(streams) == 1
+
+
+def test_a_call_is_refused_once_the_days_minutes_are_spent(
+    monkeypatch: pytest.MonkeyPatch, call_budget: app_module.CallBudget
+) -> None:
+    streams = use_settings(monkeypatch, max_call_minutes_per_day=10)
+    call_budget.charge(10 * 60)
+    browser = ScriptedBrowser([])
+
+    asyncio.run(app_module.stt_proxy(browser))
+
+    assert browser.sent == [app_module.LINE_RESTING]
+    assert browser.closed_with == 1013
+    assert streams == []  # refused before Prisma opened
+    assert app_module.stt_sessions.open == 0
+
+
+def test_a_call_ending_is_charged_to_the_days_minutes(
+    monkeypatch: pytest.MonkeyPatch, call_budget: app_module.CallBudget
+) -> None:
+    streams = use_settings(monkeypatch)
+    charged: list[float] = []
+    monkeypatch.setattr(call_budget, "charge", charged.append)
+
+    asyncio.run(app_module.stt_proxy(PacedBrowser([], leave_when=connected)))
+
+    assert len(streams) == 1
+    assert len(charged) == 1 and charged[0] >= PacedBrowser.gap / 2
+
+
+def test_a_refused_call_is_not_charged(
+    monkeypatch: pytest.MonkeyPatch, call_budget: app_module.CallBudget
+) -> None:
+    use_settings(monkeypatch, max_calls_per_client_per_hour=1)
+    charged: list[float] = []
+    monkeypatch.setattr(call_budget, "charge", charged.append)
+
+    asyncio.run(app_module.stt_proxy(ScriptedBrowser([], leave_when=connected)))
+    charged.clear()
+    second = ScriptedBrowser([])
+    asyncio.run(app_module.stt_proxy(second))
+
+    assert second.sent == [app_module.LINE_RESTING]
+    assert charged == []
+
+
+def test_one_caller_can_only_start_so_many_calls_an_hour(monkeypatch: pytest.MonkeyPatch) -> None:
+    streams = use_settings(monkeypatch, max_calls_per_client_per_hour=2)
+
+    def from_address(address: str) -> ScriptedBrowser:
+        browser = ScriptedBrowser([], leave_when=connected)
+        browser.headers["x-real-ip"] = address
+        return browser
+
+    for _ in range(2):
+        asyncio.run(app_module.stt_proxy(from_address("203.0.113.7")))
+    refused = from_address("203.0.113.7")
+    asyncio.run(app_module.stt_proxy(refused))
+    someone_else = from_address("203.0.113.8")
+    asyncio.run(app_module.stt_proxy(someone_else))
+
+    assert refused.sent == [app_module.LINE_RESTING]
+    assert connected(someone_else.sent)
+    assert len(streams) == 3
+
+
+class Clock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_the_budget_counts_minutes_over_a_rolling_day() -> None:
+    clock = Clock()
+    budget = app_module.CallBudget(clock)
+
+    assert budget.admit("a", 0, 10) is None
+    budget.charge(9 * 60)
+    assert budget.admit("a", 0, 10) is None  # under the ceiling: a call may start
+    budget.charge(60)
+    assert "10 minutes" in budget.admit("a", 0, 10)
+
+    clock.now += 86400.0 + 1
+    assert budget.admit("a", 0, 10) is None  # the day's minutes have rolled off
+
+
+def test_the_budget_counts_calls_per_caller_over_a_rolling_hour() -> None:
+    clock = Clock()
+    budget = app_module.CallBudget(clock)
+
+    assert budget.admit("a", 2, 0) is None
+    assert budget.admit("a", 2, 0) is None
+    assert "2 calls" in budget.admit("a", 2, 0)
+    assert budget.admit("b", 2, 0) is None
+
+    clock.now += 3600.0 + 1
+    assert budget.admit("a", 2, 0) is None
+    assert budget._by_client == {"a": 1}  # nobody's old calls are kept in memory
+
+
+def test_a_limit_of_zero_is_off() -> None:
+    budget = app_module.CallBudget()
+    budget.charge(10**9)
+
+    for _ in range(100):
+        assert budget.admit("a", 0, 0) is None
+
+
+def test_all_of_an_ipv6_64_is_one_caller() -> None:
+    first, second = ScriptedBrowser([]), ScriptedBrowser([])
+    first.headers["x-real-ip"] = "2001:db8:1:2:aaaa::1"
+    second.headers["x-real-ip"] = "2001:db8:1:2:bbbb::2"
+    other = ScriptedBrowser([])
+    other.headers["x-real-ip"] = "2001:db8:1:3::1"
+
+    assert app_module._client(first) == app_module._client(second) == "2001:db8:1:2::/64"
+    assert app_module._client(other) == "2001:db8:1:3::/64"
+
+
+@pytest.mark.parametrize("address", ["203.0.113.7", "not an address"])
+def test_any_other_address_is_kept_as_it_came(address: str) -> None:
+    browser = ScriptedBrowser([])
+    browser.headers["x-real-ip"] = address
+
+    assert app_module._client(browser) == address
+
+
+def test_a_rejected_console_token_is_not_printed() -> None:
+    with pytest.raises(ValidationError) as rejected:
+        isolated_settings(console_token="short-secret")
+
+    assert "short-secret" not in str(rejected.value)
+
+
+@pytest.mark.parametrize(
+    ("setting", "value", "message"),
+    [
+        ("max_consoles", 0, "MAX_CONSOLES"),
+        ("max_console_hellos", 0, "MAX_CONSOLE_HELLOS"),
+        ("max_call_minutes_per_day", -1, "cannot be negative"),
+        ("max_calls_per_client_per_hour", -1, "cannot be negative"),
+        ("max_officer_lines_queued", -1, "cannot be negative"),
+        ("min_audio_share", 1.5, "MIN_AUDIO_SHARE"),
+        ("ticket_location_retention_days", 0, "TICKET_LOCATION_RETENTION_DAYS"),
+    ],
+)
+def test_settings_reject_limits_that_make_no_sense(
+    setting: str, value: object, message: str
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        isolated_settings(**{setting: value})
+
+
+def test_every_limit_is_listed_in_the_example_settings() -> None:
+    example = (BACKEND_DIR.parent / ".env.example").read_text(encoding="utf-8")
+
+    for name in (
+        "CONSOLE_LOCAL_ONLY",
+        "MAX_CONSOLES",
+        "MAX_CONSOLE_HELLOS",
+        "MAX_CONSOLE_HELLOS_PER_CLIENT",
+        "MAX_OFFICER_LINES_QUEUED",
+        "STT_RELAY_ENABLED",
+        "MAX_CALL_MINUTES_PER_DAY",
+        "MAX_CALLS_PER_CLIENT_PER_HOUR",
+        "MIN_AUDIO_SHARE",
+        "TICKET_LOCATION_RETENTION_DAYS",
+        "WS_MAX_FRAME_BYTES",
+    ):
+        assert f"\n{name}=" in example, name
 
 
 def test_settings_tidy_the_origin_list() -> None:
