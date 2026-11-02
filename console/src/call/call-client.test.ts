@@ -136,6 +136,15 @@ describe('CallClient', () => {
     expect(call.statuses()).toEqual(['connecting', 'listening'])
   })
 
+  it('does not say listening when the mic opens during the greeting', async () => {
+    const call = setup()
+    call.socket.serverSends({ type: 'connected' })
+    call.socket.serverSends({ type: 'agent_audio_start', sample_rate: 16000 })
+    await call.grantMic()
+
+    expect(call.statuses().at(-1)).toBe('agent-speaking')
+  })
+
   it('keeps one mic when the server reconnects to Prisma mid-call', async () => {
     const call = setup()
     call.socket.serverSends({ type: 'connected' })

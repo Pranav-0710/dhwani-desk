@@ -144,7 +144,8 @@ export class CallClient {
       case 'connected':
         if (this.micRequested) break
         this.micRequested = true
-        if (await this.openMic()) this.emitStatus('listening')
+        // The greeting may already be playing once the permission prompt is answered.
+        if ((await this.openMic()) && !this.agentSpeaking) this.emitStatus('listening')
         break
       case 'transcript':
         this.onEvent({ type: 'caller', text: message.text, latencyMs: message.latency_ms })
