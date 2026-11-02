@@ -57,6 +57,19 @@ P_WARD, P_GENERIC_PLACE = 0.40, 0.20  # the rest give no location
 WARD_FORM_WEIGHTS = {"name": 0.45, "landmark": 0.30, "number": 0.25}
 P_REPEAT, P_WANTS_HUMAN, P_PERSONAL_ID = 0.25, 0.20, 0.06
 
+# Ways a caller asks for a person; the prompt shows two at random so the sentences do not all
+# carry the same wording.
+OFFICER_REQUESTS = [
+    "ಆಫೀಸರ್ ಜೊತೆ ಮಾತಾಡ್ಬೇಕು",
+    "ಯಾರಾದ್ರೂ ಮನುಷ್ಯರು ಮಾತಾಡಿ",
+    "ಮೆಷಿನ್ ಬೇಡ, ಆಫೀಸರ್ ಕೊಡಿ",
+    "ಮೇಲಧಿಕಾರಿಯನ್ನ ಕೊಡಿ",
+    "ನನಗೆ ಒಬ್ಬ ಆಫೀಸರ್ ಬೇಕು",
+    "ಅಧಿಕಾರಿ ಜೊತೆ ಮಾತಾಡಿಸಿ",
+    "ರೋಬೋಟ್ ಜೊತೆ ಮಾತಾಡಕ್ಕಾಗಲ್ಲ, ಯಾರಾದ್ರೂ ಫೋನ್ ತಗೊಳ್ಳಿ",
+    "ಸೂಪರ್ವೈಸರ್ಗೆ ಫೋನ್ ಕೊಡಿ",
+]
+
 MIN_WORDS, MAX_WORDS = 3, 40
 MAX_NEW_TOKENS = 512  # Kannada costs several tokens per word; the reply also carries the gloss
 LATIN = re.compile(r"[A-Za-z]")
@@ -178,10 +191,10 @@ def build_messages(spec: dict[str, Any], rng: random.Random) -> list[dict[str, s
         "- Say that you already complained before and nothing happened."
         if labels["repeat_complaint"]
         else "- Do not say that you complained before.",
-        "- Say clearly, in your own words, that you want to speak to an officer or a real "
-        "person and not this machine, for example ಆಫೀಸರ್ ಜೊತೆ ಮಾತಾಡ್ಬೇಕು, ಯಾರಾದ್ರೂ ಮನುಷ್ಯರು "
-        "ಮಾತಾಡಿ, ಮೆಷಿನ್ ಬೇಡ, ಮೇಲಧಿಕಾರಿಯನ್ನ ಕೊಡಿ. Make it a request for a person, not only a "
-        "complaint."
+        "- Say clearly that you want to speak to an officer or a real person and not this "
+        "machine. Make it a request for a person, not only a complaint. Put it in your own "
+        f"words; callers say things like {'; '.join(rng.sample(OFFICER_REQUESTS, 2))}. "
+        "Do not copy these word for word."
         if labels["wants_human"]
         else "- Do not ask for an officer or a person.",
     ]
