@@ -238,6 +238,28 @@ def test_a_call_gives_up_when_prisma_keeps_failing(monkeypatch: pytest.MonkeyPat
     assert browser.closed_with == 1011
 
 
+def test_a_new_prisma_session_does_not_earn_the_call_more_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    use_dialogue_fakes(monkeypatch, FakeTts())
+    monkeypatch.setattr(app_module, "STT_RECONNECT_DELAY_S", 0.01)
+    monkeypatch.setattr(app_module, "stt_max_session_s", 0.15)
+
+    class DropsSoon(FakeStream):
+        async def __aenter__(self):
+            asyncio.get_running_loop().call_later(0.1, self.close_cleanly, 1000, "")
+            return await super().__aenter__()
+
+    monkeypatch.setattr(app_module, "stt_stream_factory", lambda settings: DropsSoon())
+    browser = ScriptedBrowser([], leave_when=lambda sent: False)
+
+    asyncio.run(app_module.call(browser))
+
+    # One limit across the sessions; each alone stays well under it.
+    assert browser.sent[-1] == app_module.TOO_LONG
+    assert browser.closed_with == 1008
+
+
 def test_a_rejected_key_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
     use_dialogue_fakes(monkeypatch, FakeTts())
     monkeypatch.setattr(app_module, "STT_RECONNECT_DELAY_S", 0.01)

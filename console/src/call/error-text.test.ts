@@ -62,11 +62,10 @@ describe('callErrorText', () => {
     expect(callErrorText(message)).not.toContain('503')
   })
 
-  it("keeps the speech service's close reason out of the caller's view", async () => {
-    const message = await clientError((socket) => send(socket, { type: 'closed', reason: 'quota' }))
+  it("tells the caller what to do when the speech service ends the call", async () => {
+    const message = await clientError((socket) => send(socket, { type: 'closed' }))
 
     expect(callErrorText(message)).toContain('Press Call')
-    expect(callErrorText(message)).not.toContain('quota')
   })
 
   it("shows the backend's own messages as they came", () => {

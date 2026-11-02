@@ -54,3 +54,4 @@ From 2026-10-28 Lakshmi Narasimman is away again, and Jey Pranav is doing the re
 | 2026-11-01 | Jey Pranav | #71 | Low-priority review fixes: strict CSP, barge-in keeps the first syllables and survives a race, eval survives a Prisma error, CI actions and base images pinned (#70) |
 | 2026-11-02 | Jey Pranav | #73 | Clearer phone page and console: safety calls first, one-screen phone with the newest line in view, Kannada-first status, keyboard take-over, contrast, readable at 100% and 50% zoom (#72) |
 | 2026-11-02 | Jey Pranav | #75 | Read-back lines no longer repeat the "okay" said just before them (#74) |
+| 2026-11-02 | Jey Pranav | #77 | Threat model and fixes: credit ceiling, /ws/stt off, console sockets capped and origin-checked, masked numbers on consoles, ticket locations blanked after 30 days, flush backlog fixed (#76) |

@@ -9,6 +9,8 @@ from websockets.asyncio.server import ServerConnection, serve
 
 from gnani.prisma import (
     FRAME_BYTES,
+    MAX_BUFFERED_SECONDS,
+    RECOVERABLE_ERROR,
     PrismaClosed,
     PrismaConfig,
     PrismaOverflow,
@@ -189,6 +191,44 @@ def test_clean_close_ends_events_and_exposes_code() -> None:
     assert types == ["connected"]
     assert (code, reason) == (1000, "session limit")
     assert sender_error is None
+
+
+def test_a_flush_counts_against_the_backlog() -> None:
+    async def scenario() -> int:
+        stream = PrismaStream(PrismaConfig(api_key="k", sample_rate=8000))
+        # Never connected, so nothing drains: a byte and a flush, over and over.
+        with pytest.raises(PrismaOverflow):
+            for _ in range(10_000):
+                await stream.send_audio(b"\x00")
+                await stream.flush()
+        return stream._frames.qsize()
+
+    queued = asyncio.run(scenario())
+
+    assert queued <= int(MAX_BUFFERED_SECONDS * 8000 * 2 / FRAME_BYTES)
+
+
+def test_a_flush_with_nothing_buffered_is_not_an_overflow() -> None:
+    async def scenario() -> None:
+        stream = PrismaStream(PrismaConfig(api_key="k", sample_rate=8000))
+        await stream.send_audio(b"\x00" * FRAME_BYTES * 46)
+        await stream.flush()
+
+    asyncio.run(scenario())
+
+
+def test_prismas_error_text_is_logged_and_not_passed_on(caplog) -> None:
+    async def fake_prisma(connection: ServerConnection) -> None:
+        await connection.send(json.dumps({"type": "error", "message": "account 42 is out of cash"}))
+
+    async def scenario(config: PrismaConfig) -> list[dict]:
+        async with PrismaStream(config) as stream:
+            return [event.to_client() async for event in stream.events()]
+
+    events = asyncio.run(with_fake_prisma(fake_prisma, scenario))
+
+    assert events == [{"type": "error", "message": RECOVERABLE_ERROR}]
+    assert "account 42 is out of cash" in caplog.text
 
 
 def test_abnormal_close_raises_prisma_closed() -> None:

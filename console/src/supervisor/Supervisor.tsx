@@ -249,7 +249,7 @@ function TokenGate({ problem, onSubmit }: { problem: string | null; onSubmit: (t
       }}
     >
       <h1>Supervisor console</h1>
-      <p className="subtitle">Enter the console token (CONSOLE_TOKEN in the backend's .env).</p>
+      <p className="subtitle">Enter the console token.</p>
       <label>
         Console token
         <input type="password" autoComplete="off" value={value} onChange={(e) => setValue(e.target.value)} />

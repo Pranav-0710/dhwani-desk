@@ -30,7 +30,8 @@ class Speaker:
     call carries on with the next line. A line cut by `interrupt` ends with `agent_audio_end`
     marked `interrupted`. Lines still queued when the call ends are dropped.
 
-    The queue is unbounded; the dialogue queues one reply (a few lines) per caller turn.
+    The queue is unbounded; the dialogue queues one reply (a few lines) per caller turn, and the
+    call route checks `queued` before queueing an officer's line.
     """
 
     def __init__(self, tts: SpeechStream, outbox: Outbox, sample_rate: int) -> None:
@@ -47,6 +48,11 @@ class Speaker:
 
     def say(self, text: str) -> None:
         self._lines.put_nowait(text)
+
+    @property
+    def queued(self) -> int:
+        """Lines waiting behind the one being spoken."""
+        return self._lines.qsize()
 
     def interrupt(self) -> None:
         """The caller spoke over the agent (barge-in): stop the line being sent and drop the

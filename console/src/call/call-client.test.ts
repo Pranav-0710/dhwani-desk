@@ -228,9 +228,9 @@ describe('CallClient', () => {
     expect(call.mic.noise).toEqual(['heavy', 'off'])
   })
 
-  it('does not print empty brackets when Prisma closes without a reason', () => {
+  it('says the speech service ended the call when Prisma closes it', () => {
     const call = setup()
-    call.socket.serverSends({ type: 'closed', reason: '' })
+    call.socket.serverSends({ type: 'closed' })
 
     expect(call.events.at(-1)).toEqual({ type: 'error', message: 'Speech service ended the call' })
   })

@@ -30,7 +30,7 @@ type ServerMessage =
   | { type: 'agent_audio_start'; sample_rate: number }
   | { type: 'agent_audio_end'; interrupted?: boolean }
   | { type: 'tts_error'; message: string }
-  | { type: 'closed'; reason: string }
+  | { type: 'closed' }
   | { type: 'error'; message: string }
   | { type: 'dialogue'; state: string }
 
@@ -177,10 +177,7 @@ export class CallClient {
         this.onEvent({ type: 'error', message: `Agent voice failed: ${message.message}` })
         break
       case 'closed':
-        this.onEvent({
-          type: 'error',
-          message: `Speech service ended the call${message.reason ? ` (${message.reason})` : ''}`,
-        })
+        this.onEvent({ type: 'error', message: 'Speech service ended the call' })
         break
       case 'error':
         this.onEvent({ type: 'error', message: message.message })

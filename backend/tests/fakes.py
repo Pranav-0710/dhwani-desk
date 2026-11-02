@@ -18,8 +18,9 @@ PHONE_ORIGIN = "http://localhost:5173"
 
 
 def isolated_settings(**overrides: object) -> Settings:
-    """Settings that ignore the developer's local .env."""
-    return Settings(_env_file=None, **overrides)
+    """Settings that ignore the developer's local .env, with /ws/stt on: most tests of the checks
+    both call sockets share drive it, as the smaller route."""
+    return Settings(_env_file=None, **{"stt_relay_enabled": True, **overrides})
 
 
 class FakeStream:

@@ -1,8 +1,9 @@
 """Tickets and caller transcripts in SQLite.
 
-Two tables, kept apart on purpose: `tickets` holds only what a field team needs and stays,
-while `transcripts` holds what callers said and is deleted after the retention period. Both
-are masked before they are written (tickets/masking.py), so no personal number is ever stored.
+Two tables, kept apart on purpose: `tickets` holds only what a field team needs and stays (its
+`location_text`, the caller's own words, is blanked after a longer period), while `transcripts`
+holds what callers said and is deleted after the retention period. Both are masked before they
+are written (tickets/masking.py), so no personal number is ever stored.
 A shared contract: the console (#18) and the eval harness (#19) read these fields.
 """
 
@@ -159,6 +160,18 @@ class TicketStore:
         cutoff = ((at or now()) - timedelta(days=older_than_days)).isoformat(timespec="seconds")
         with self._lock, self._db:
             cursor = self._db.execute("DELETE FROM transcripts WHERE created_at < ?", (cutoff,))
+        return cursor.rowcount
+
+    def purge_ticket_locations(self, older_than_days: int, at: datetime | None = None) -> int:
+        """Blank the caller's words on tickets older than the retention period; the ticket
+        itself stays. Returns how many were blanked."""
+        cutoff = ((at or now()) - timedelta(days=older_than_days)).isoformat(timespec="seconds")
+        with self._lock, self._db:
+            cursor = self._db.execute(
+                "UPDATE tickets SET location_text = ''"
+                " WHERE created_at < ? AND location_text != ''",
+                (cutoff,),
+            )
         return cursor.rowcount
 
 
