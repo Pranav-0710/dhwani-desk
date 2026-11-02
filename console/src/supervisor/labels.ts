@@ -35,5 +35,5 @@ export function wardLabel(id: string | null | undefined): string {
 }
 
 export function departmentLabel(id: string | null | undefined): string {
-  return id ? (DEPARTMENTS[id] ?? id) : 'Not yet known'
+  return id ? (DEPARTMENTS[id] ?? id) : 'Department not yet known'
 }

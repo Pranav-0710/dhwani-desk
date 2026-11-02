@@ -52,3 +52,4 @@ From 2026-10-28 Lakshmi Narasimman is away again, and Jey Pranav is doing the re
 | 2026-11-01 | Jey Pranav | #66 | A failed turn hands the call to an officer instead of going silent; barge-in no longer cuts the ticket number or safety advice (#65) |
 | 2026-11-01 | Jey Pranav | #69 | Review fixes: one call per caller and a 10-minute cap, ticket filing off the event loop, corrected wards kept, generic error text, digit-word numbers masked (#68) |
 | 2026-11-01 | Jey Pranav | #71 | Low-priority review fixes: strict CSP, barge-in keeps the first syllables and survives a race, eval survives a Prisma error, CI actions and base images pinned (#70) |
+| 2026-11-02 | Jey Pranav | #73 | Clearer phone page and console: safety calls first, one-screen phone with the newest line in view, Kannada-first status, keyboard take-over, contrast, readable at 100% and 50% zoom (#72) |

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type RefObject } from 'react'
 import { ConsoleClient, type Command, type ConsoleStatus } from './console-client'
 import { DEPARTMENTS, URGENCY_LEVELS, WARDS, departmentLabel, wardLabel } from './labels'
 import {
@@ -6,6 +6,8 @@ import {
   REASON_LABEL,
   applyMessage,
   callToShow,
+  callsByUrgency,
+  isSafety,
   needsOfficer,
   waitingCalls,
   type ConsoleState,
@@ -62,6 +64,15 @@ export default function Supervisor() {
   const [selected, setSelected] = useState<string | null>(null)
   const [tickets, setTickets] = useState<StoredTicket[]>([])
   const client = useRef<ConsoleClient | null>(null)
+  const takeOverButton = useRef<HTMLButtonElement>(null)
+  // Set by the banner: once its call is on screen, the keyboard goes to that call's Take over.
+  const goToTakeOver = useRef(false)
+
+  useEffect(() => {
+    if (!goToTakeOver.current) return
+    goToTakeOver.current = false
+    takeOverButton.current?.focus()
+  })
 
   const refreshTickets = useCallback(() => {
     if (!token) return
@@ -116,8 +127,9 @@ export default function Supervisor() {
   // longest-waiting, or the newest) and pinned, so a take-over or a new call never moves it.
   const shown = callToShow(state, selected)
   if (shown && shown !== selected) setSelected(shown)
-  const calls = state.order.map((id) => state.calls[id])
+  const calls = callsByUrgency(state)
   const waiting = waitingCalls(state)
+  const first = waiting.at(0)
   const current = shown ? state.calls[shown] : null
 
   if (!token || status === 'refused') {
@@ -154,23 +166,41 @@ export default function Supervisor() {
           <h1>Nagara Seva supervisor console</h1>
           <p className="subtitle">City Corporation of Hosapura · live calls and tickets</p>
         </div>
-        <span className={`sv-status sv-status-${status}`}>{STATUS_LABEL[status]}</span>
+        <span className={`sv-status sv-status-${status}`} role="status">
+          {STATUS_LABEL[status]}
+        </span>
       </header>
 
       <div role="alert" aria-live="assertive">
-        {waiting.length > 0 && (
-          <button className="sv-alert" onClick={() => setSelected(waiting[0].id)}>
-            {waiting.length === 1 ? 'A call needs' : `${waiting.length} calls need`} an officer:{' '}
-            {REASON_LABEL[waiting[0].reason ?? ''] ?? waiting[0].reason}
-            {waiting[0].id !== shown ? ' · show it' : ''}
+        {first && (
+          <button
+            type="button"
+            className={`sv-alert${isSafety(first) ? ' is-safety' : ''}`}
+            onClick={() => {
+              goToTakeOver.current = true
+              setSelected(first.id)
+            }}
+          >
+            <span className="sv-alert-mark" aria-hidden="true">
+              !
+            </span>
+            <span className="sv-alert-text">
+              {REASON_LABEL[first.reason ?? ''] ?? first.reason}: {departmentLabel(first.slots.department)},{' '}
+              {wardLabel(first.slots.ward)}
+              <span className="sv-alert-more">
+                Waiting for an officer
+                {waiting.length > 1 ? `, and ${waiting.length - 1} more waiting` : ''}
+              </span>
+            </span>
+            <span className="sv-alert-action">{first.id === shown ? 'Go to Take over' : 'Show this call'}</span>
           </button>
         )}
       </div>
       {problem && (
-        <p className="error">
+        <p className="error" role="alert">
           {problem}{' '}
           {status === 'closed' && (
-            <button className="sv-secondary sv-inline" onClick={() => setAttempt((n) => n + 1)}>
+            <button type="button" className="sv-secondary sv-inline" onClick={() => setAttempt((n) => n + 1)}>
               Reconnect
             </button>
           )}
@@ -180,9 +210,26 @@ export default function Supervisor() {
       <div className="sv-main">
         <CallList calls={calls} current={shown} onSelect={setSelected} />
         {current ? (
-          <CallView key={current.id} call={current} thresholds={state.thresholds} send={sendFor(current.id)} />
+          <CallView
+            key={current.id}
+            call={current}
+            thresholds={state.thresholds}
+            send={sendFor(current.id)}
+            takeOverButton={takeOverButton}
+          />
         ) : (
-          <section className="sv-call sv-empty">No live calls. They appear here as they start.</section>
+          <section className="sv-call sv-empty" aria-label="Selected call">
+            {status === 'connected' ? (
+              <>
+                <h2>No live calls</h2>
+                <p>
+                  A call shows here as soon as it starts. <a href="/">Open the phone page</a> to place one.
+                </p>
+              </>
+            ) : (
+              <h2>{status === 'closed' && problem ? 'Not connected, so no calls can show' : 'Connecting…'}</h2>
+            )}
+          </section>
         )}
       </div>
 
@@ -207,7 +254,11 @@ function TokenGate({ problem, onSubmit }: { problem: string | null; onSubmit: (t
         Console token
         <input type="password" autoComplete="off" value={value} onChange={(e) => setValue(e.target.value)} />
       </label>
-      {problem && <p className="error">{problem}</p>}
+      {problem && (
+        <p className="error" role="alert">
+          {problem}
+        </p>
+      )}
       <button className="call" type="submit">
         Open console
       </button>
@@ -234,27 +285,43 @@ function CallList({
 }) {
   return (
     <nav className="sv-calls" aria-label="Live calls">
-      <h2>Calls</h2>
-      {calls.length === 0 && <p className="subtitle">None yet</p>}
+      <h2>Calls{calls.length > 0 ? ` (${calls.length})` : ''}</h2>
+      {calls.length === 0 && <p className="subtitle sv-empty-calls">None right now</p>}
       <ul>
-        {calls.map((call) => (
-          <li key={call.id}>
-            <button
-              className={[
-                'sv-call-item',
-                call.id === current ? 'is-current' : '',
-                needsOfficer(call) ? 'is-waiting' : '',
-                call.ended ? 'is-ended' : '',
-              ].join(' ')}
-              aria-current={call.id === current}
-              onClick={() => onSelect(call.id)}
-            >
-              <span className="sv-call-time">{new Date(call.startedAt).toLocaleTimeString()}</span>
-              <span>{departmentLabel(call.slots.department)}</span>
-              <span className="sv-call-state">{stateLabel(call)}</span>
-            </button>
-          </li>
-        ))}
+        {calls.map((call) => {
+          const waiting = needsOfficer(call)
+          const urgency = (call.decision ?? call.screening)?.urgency
+          const pressing = urgency === 'urgent' || urgency === 'emergency'
+          return (
+            <li key={call.id}>
+              <button
+                type="button"
+                className={[
+                  'sv-call-item',
+                  call.id === current ? 'is-current' : '',
+                  waiting ? 'is-waiting' : '',
+                  waiting && isSafety(call) ? 'is-safety' : '',
+                  call.ended ? 'is-ended' : '',
+                ].join(' ')}
+                aria-current={call.id === current ? 'true' : undefined}
+                onClick={() => onSelect(call.id)}
+              >
+                {isSafety(call) && !call.ended ? (
+                  <span className="sv-chip sv-urgency-emergency">{REASON_LABEL.safety}</span>
+                ) : (
+                  waiting && <span className="sv-chip sv-urgency-urgent">{REASON_LABEL[call.reason ?? ''] ?? call.reason}</span>
+                )}
+                <span className="sv-call-dept">{departmentLabel(call.slots.department)}</span>
+                <span>{wardLabel(call.slots.ward)}</span>
+                <span className="sv-call-state">{stateLabel(call)}</span>
+                <span className="sv-call-time">
+                  {new Date(call.startedAt).toLocaleTimeString()}
+                  {pressing && !call.ended ? ` · ${urgency}` : ''}
+                </span>
+              </button>
+            </li>
+          )
+        })}
       </ul>
     </nav>
   )
@@ -264,27 +331,50 @@ function CallView({
   call,
   thresholds,
   send,
+  takeOverButton,
 }: {
   call: LiveCall
   thresholds: Thresholds | null
   send: (command: Command, text?: string) => Promise<void>
+  takeOverButton: RefObject<HTMLButtonElement | null>
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const transcript = useRef<HTMLOListElement>(null)
+  const sayInput = useRef<HTMLInputElement>(null)
+  // The button just pressed goes away when the call changes hands: its next control gets the
+  // keyboard, whichever comes first of the command's answer and the call's new state.
+  const handOver = useRef<'to-officer' | 'to-agent' | null>(null)
 
   useEffect(() => {
     transcript.current?.scrollTo({ top: transcript.current.scrollHeight })
   }, [call.lines.length])
 
+  useEffect(() => {
+    if (handOver.current === 'to-officer' && call.officer) {
+      handOver.current = null
+      sayInput.current?.focus()
+    } else if (handOver.current === 'to-agent' && call.state !== 'handed_off') {
+      handOver.current = null
+      takeOverButton.current?.focus()
+    }
+  }, [call.officer, call.state, takeOverButton])
+
   async function run(command: Command, text?: string) {
+    if (busy) return
     setBusy(true)
     setError(null)
+    if (command === 'take_over') handOver.current = 'to-officer'
+    if (command === 'hand_back') handOver.current = 'to-agent'
     try {
       await send(command, text)
-      if (command === 'say') setDraft('')
+      if (command === 'say') {
+        setDraft('')
+        sayInput.current?.focus()
+      }
     } catch (failure) {
+      handOver.current = null
       setError((failure as Error).message)
     } finally {
       setBusy(false)
@@ -292,42 +382,76 @@ function CallView({
   }
 
   const live = !call.ended && call.state !== 'closed'
+  const waiting = needsOfficer(call)
+  const reason = REASON_LABEL[call.reason ?? ''] ?? call.reason
+  const handBack = call.state === 'handed_off' && (
+    <button type="button" className="sv-secondary" aria-disabled={busy} onClick={() => void run('hand_back')}>
+      Hand back to the agent
+    </button>
+  )
   return (
     <section className="sv-call" aria-label="Selected call">
-      <div className="sv-call-head">
-        <div>
-          <h2>{departmentLabel(call.slots.department)}</h2>
-          <p className="subtitle">
-            {wardLabel(call.slots.ward)} · {stateLabel(call)}
-            {call.reason ? ` · ${REASON_LABEL[call.reason] ?? call.reason}` : ''}
-          </p>
+      <div className="sv-call-body">
+        <div className="sv-call-head">
+          <div>
+            <h2>{departmentLabel(call.slots.department)}</h2>
+            <p className="subtitle">
+              {wardLabel(call.slots.ward)} · {stateLabel(call)}
+              {reason && !waiting ? ` · ${reason}` : ''}
+            </p>
+          </div>
+          {call.ticket && <span className="sv-ticket-chip">Ticket #{call.ticket.number}</span>}
         </div>
-        {call.ticket && <span className="sv-ticket-chip">Ticket #{call.ticket.number}</span>}
-      </div>
 
-      {needsOfficer(call) && (
-        <p className="sv-call-alert" role="alert">
-          {REASON_LABEL[call.reason ?? ''] ?? 'Handed off'}: take the call.
-        </p>
-      )}
-
-      <ol className="sv-transcript" ref={transcript} aria-label="Transcript" aria-live="polite">
-        {call.lines.map((line, index) => (
-          <li key={index} className={`sv-line sv-${line.who}`}>
-            <span className="who">{line.who === 'officer' ? 'Officer (agent voice)' : line.who === 'caller' ? 'Caller' : 'Agent'}</span>
-            <span className="text">{line.text}</span>
-          </li>
-        ))}
-      </ol>
-
-      <DecisionBars decision={call.decision} screening={call.screening} thresholds={thresholds} joinedMidCall={call.joinedMidCall} />
-
-      <div className="sv-controls">
-        {!call.officer ? (
-          <button className="call" disabled={busy || !live} onClick={() => run('take_over')}>
-            Take over
-          </button>
+        {!live ? (
+          <div className="sv-action">
+            <p>{call.ended ? 'This call has ended.' : 'The agent is closing this call.'}</p>
+          </div>
+        ) : call.officer ? (
+          <div className="sv-action is-officer">
+            <p>
+              <strong>Officer on the line</strong>
+              The agent stays quiet and says only what is typed below.
+            </p>
+            {handBack}
+          </div>
         ) : (
+          <div className={`sv-action${waiting ? ' is-waiting' : ''}`}>
+            <p>
+              <strong>{waiting ? (reason ?? 'Handed off') : 'Agent handling'}</strong>
+              {waiting ? 'The caller is waiting for an officer.' : 'Take over to speak to the caller yourself.'}
+            </p>
+            <button
+              type="button"
+              className="sv-take-over"
+              ref={takeOverButton}
+              aria-disabled={busy}
+              onClick={() => void run('take_over')}
+            >
+              Take over
+            </button>
+            {handBack}
+          </div>
+        )}
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
+
+        <ol className="sv-transcript" ref={transcript} aria-label="Transcript" aria-live="polite">
+          {call.lines.length === 0 && <li className="sv-transcript-empty">Nothing has been said yet.</li>}
+          {call.lines.map((line, index) => (
+            <li key={index} className={`sv-line sv-${line.who}`}>
+              <span className="who">{line.who === 'officer' ? 'Officer (agent voice)' : line.who === 'caller' ? 'Caller' : 'Agent'}</span>
+              <span className="text" lang="kn">
+                {line.text}
+              </span>
+            </li>
+          ))}
+        </ol>
+
+        {live && call.officer && (
           <form
             className="sv-say"
             onSubmit={(event) => {
@@ -340,22 +464,26 @@ function CallView({
             </label>
             <input
               id={`say-${call.id}`}
+              ref={sayInput}
+              lang="kn"
               value={draft}
               maxLength={MAX_OFFICER_LINE}
               placeholder="Type in Kannada; the agent's voice says it"
+              aria-describedby={`say-count-${call.id}`}
               onChange={(e) => setDraft(e.target.value)}
-              disabled={busy || !live}
+              readOnly={busy}
             />
-            <button className="call" type="submit" disabled={busy || !live || !draft.trim()}>
+            <button className="call" type="submit" aria-disabled={busy} disabled={!draft.trim()}>
               Say
             </button>
+            <span className="sv-say-count" id={`say-count-${call.id}`}>
+              {draft.length} of {MAX_OFFICER_LINE} characters
+            </span>
           </form>
         )}
-        <button className="sv-secondary" disabled={busy || !live || call.state !== 'handed_off'} onClick={() => run('hand_back')}>
-          Hand back to the agent
-        </button>
       </div>
-      {error && <p className="error">{error}</p>}
+
+      <DecisionBars decision={call.decision} screening={call.screening} thresholds={thresholds} joinedMidCall={call.joinedMidCall} />
     </section>
   )
 }
@@ -414,9 +542,11 @@ function DecisionBars({
   const handOffMood = decision && thresholds?.hand_off_caller_states.includes(decision.caller_state)
   return (
     <section className="sv-bars" aria-label="Laya's decision">
-      <h3>
-        Decision {screening && !decision ? '(safety step; the rest is still running)' : ''}
-      </h3>
+      <h3>Laya's decision</h3>
+      <p className="sv-bars-note">
+        {screening && !decision ? 'Safety step; the rest is still running. ' : ''}
+        Probability of yes. The upright mark is the threshold.
+      </p>
       <p className="sv-chips">
         <span className={`sv-chip sv-urgency-${urgency}`}>Urgency: {urgency}</span>
         {decision && (
@@ -429,8 +559,12 @@ function DecisionBars({
           const over = pastThreshold(row)
           const threshold = row.threshold === undefined ? '' : `, threshold ${row.threshold.toFixed(2)}`
           return (
-            <li key={row.name} className={over ? (row.risk ? 'is-alarm' : 'is-met') : ''}>
-              <span className="sv-bar-label">{row.label}</span>
+            <li key={row.name} className={`${row.risk ? 'is-risk' : ''} ${over ? (row.risk ? 'is-alarm' : 'is-met') : ''}`}>
+              <span className="sv-bar-label">
+                {row.label}
+                {over && row.risk ? ' · past threshold' : ''}
+              </span>
+              <span className="sv-bar-value">{row.value.toFixed(2)}</span>
               <span
                 className="sv-bar"
                 role="meter"
@@ -445,7 +579,6 @@ function DecisionBars({
                   <span className="sv-bar-mark" style={{ left: `${row.threshold * 100}%` }} title={`Threshold ${row.threshold}`} />
                 )}
               </span>
-              <span className="sv-bar-value">{row.value.toFixed(2)}</span>
             </li>
           )
         })}
@@ -473,7 +606,7 @@ function TicketTable({ tickets, error }: { tickets: StoredTicket[]; error: strin
   return (
     <section className="sv-tickets" aria-label="Tickets">
       <div className="sv-tickets-head">
-        <h2>Tickets</h2>
+        <h2>Tickets{tickets.length > 0 ? ` (${tickets.length})` : ''}</h2>
         <div className="sv-filters">
           {select('department', Object.entries(DEPARTMENTS))}
           {select('ward', [...Object.keys(WARDS).map((id): [string, string] => [id, wardLabel(id)]), ['unknown', 'Unknown ward']])}
@@ -485,7 +618,7 @@ function TicketTable({ tickets, error }: { tickets: StoredTicket[]; error: strin
         <table>
           <thead>
             <tr>
-              <th scope="col">#</th>
+              <th scope="col">Ticket</th>
               <th scope="col">Department</th>
               <th scope="col">Ward</th>
               <th scope="col">Urgency</th>
