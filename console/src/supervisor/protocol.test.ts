@@ -3,6 +3,7 @@ import {
   EMPTY,
   applyMessage,
   callToShow,
+  callsByUrgency,
   needsOfficer,
   waitingCalls,
   type DialogueEvent,
@@ -217,5 +218,36 @@ describe('callToShow', () => {
     const later = run(at('a', 1), handOff('a'), at('b', 2), at('c', 3))
 
     expect(callToShow(later, pinned)).toBe('a')
+  })
+
+  const handOffFor = (id: string, reason: string, officer = false): ServerMessage => ({
+    type: 'call_event',
+    call_id: id,
+    event: { ...(dialogue({ state: 'handed_off', reason, officer }) as { event: DialogueEvent }).event },
+  })
+
+  it('puts a safety risk ahead of calls that have waited longer', () => {
+    const state = run(at('a', 1), at('b', 2), at('c', 3), handOffFor('a', 'wants_human'), handOffFor('b', 'distressed'), handOffFor('c', 'safety'))
+
+    expect(waitingCalls(state).map((c) => c.id)).toEqual(['c', 'a', 'b'])
+    expect(callToShow(state, null)).toBe('c')
+    expect(callToShow(state, 'a')).toBe('a')
+  })
+
+  it('lists waiting calls first, then officer, agent and ended calls, each newest first', () => {
+    const state = run(
+      at('ended', 1),
+      at('agent-old', 2),
+      at('officer', 3),
+      at('agent-new', 4),
+      at('waiting', 5),
+      at('safety', 6),
+      { type: 'call_closed', call_id: 'ended' },
+      handOffFor('officer', 'taken_over', true),
+      handOffFor('waiting', 'wants_human'),
+      handOffFor('safety', 'safety'),
+    )
+
+    expect(callsByUrgency(state).map((c) => c.id)).toEqual(['safety', 'waiting', 'officer', 'agent-new', 'agent-old', 'ended'])
   })
 })

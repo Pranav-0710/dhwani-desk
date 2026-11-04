@@ -1,6 +1,7 @@
 """Every test gets its own in-memory ticket store, so no test writes a database file, and the
 keyword decider, so a developer's DECIDER=laya never loads a model in a test. Each also gets
-its own count of open STT sessions, which must be back to zero when it ends."""
+its own count of open STT sessions, which must be back to zero when it ends, its own credit
+ceiling and its own count of console sockets."""
 
 from collections.abc import Iterator
 
@@ -37,3 +38,19 @@ def stt_sessions(monkeypatch: pytest.MonkeyPatch) -> Iterator[app_module.Session
     monkeypatch.setattr(app_module, "stt_sessions", sessions)
     yield sessions
     assert sessions.open == 0, "a session kept its place after it ended"
+
+
+@pytest.fixture(autouse=True)
+def call_budget(monkeypatch: pytest.MonkeyPatch) -> app_module.CallBudget:
+    budget = app_module.CallBudget()
+    monkeypatch.setattr(app_module, "call_budget", budget)
+    return budget
+
+
+@pytest.fixture(autouse=True)
+def console_sockets(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    hellos, consoles = app_module.SessionCount(), app_module.SessionCount()
+    monkeypatch.setattr(app_module, "console_hellos", hellos)
+    monkeypatch.setattr(app_module, "open_consoles", consoles)
+    yield
+    assert hellos.open == 0 and consoles.open == 0, "a console socket kept its place"

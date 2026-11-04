@@ -34,6 +34,12 @@ EVENT_TYPES: frozenset[str] = frozenset(get_args(EventType))
 # websockets logs every handshake header at DEBUG, including the API key.
 logging.getLogger("websockets.client").setLevel(logging.INFO)
 
+logger = logging.getLogger("dhwani.prisma")
+
+# What a browser is told about a Prisma error the session survives. Prisma's own text may name
+# the account or its quota, so it stays in the log.
+RECOVERABLE_ERROR = "Speech recognition had a problem; the call is still on"
+
 
 class PrismaError(Exception):
     """Base class for failures of the Prisma session."""
@@ -112,8 +118,8 @@ class SttEvent:
                 "audio_duration_ms": self.audio_duration_ms,
                 "latency_ms": self.latency_ms,
             }
-        if self.message:
-            payload["message"] = self.message
+        if self.type == "error":
+            payload["message"] = RECOVERABLE_ERROR
         return payload
 
 
@@ -199,7 +205,13 @@ class PrismaStream:
             del self._buffer[:FRAME_BYTES]
 
     async def flush(self) -> None:
-        """Send any partial frame, padded with silence."""
+        """Send any partial frame, padded with silence. Counts against the backlog like
+        `send_audio`: one byte and a flush, repeated, would otherwise queue frames for ever."""
+        if self._buffer and self._frames.qsize() >= self._max_frames:
+            raise PrismaOverflow()
+        self._queue_partial_frame()
+
+    def _queue_partial_frame(self) -> None:
         if self._buffer:
             self._frames.put_nowait(bytes(self._buffer).ljust(FRAME_BYTES, b"\x00"))
             self._buffer.clear()
@@ -217,6 +229,8 @@ class PrismaStream:
         try:
             async for message in self._ws:
                 if isinstance(message, str) and (event := parse_event(message)):
+                    if event.type == "error":
+                        logger.warning("Prisma reported an error: %s", event.message)
                     yield event
         except ConnectionClosedError as exc:
             code = exc.rcvd.code if exc.rcvd else None
@@ -233,7 +247,7 @@ class PrismaStream:
     async def aclose(self) -> None:
         try:
             if self._sender is not None and not self._sender.done():
-                await self.flush()
+                self._queue_partial_frame()
                 self._frames.put_nowait(None)
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self._sender, timeout=5)

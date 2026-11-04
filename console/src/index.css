@@ -4,11 +4,21 @@
   --text: #1c2430;
   --muted: #5b6573;
   --accent: #1f7a4d;
+  --on-accent: #ffffff;
+  --listening: #1a56c4;
+  --on-listening: #ffffff;
   --danger: #c0392b;
+  --on-danger: #ffffff;
+  --danger-bg: #fdecea;
   --caller: #e8f0fe;
   --agent: #e9f6ef;
   --border: #dde1e7;
+  color-scheme: light dark;
   font-family: system-ui, 'Noto Sans Kannada', 'Nirmala UI', 'Tunga', sans-serif;
+  /* Everything is sized in rem. The root grows only when the window is both wide and tall in CSS
+     pixels, which is what zooming out does: the demo is filmed at 50% browser zoom, which doubles
+     both and halves what they look like. A full-screen window at 100% keeps normal text. */
+  font-size: clamp(100%, min(1.35vw, 1.5vh), 200%);
   color: var(--text);
   background: var(--bg);
 }
@@ -20,10 +30,15 @@
     --text: #e6e9ee;
     --muted: #9aa4b2;
     --accent: #3fb37a;
+    --on-accent: #08170f;
+    --listening: #8ab4f8;
+    --on-listening: #0b1a33;
     --danger: #e5675a;
+    --on-danger: #200906;
+    --danger-bg: #3b1d1b;
     --caller: #1f2c45;
     --agent: #1c3328;
-    --border: #2c343f;
+    --border: #3a4452;
   }
 }
 
@@ -35,17 +50,26 @@ body {
   margin: 0;
   min-height: 100vh;
   display: flex;
+}
+
+/* Fills the window whatever is on the page, so a page's width never depends on its content. */
+#root {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   justify-content: center;
 }
 
+/* One screen: the transcript scrolls, so the status and Hang up never leave it. */
 .phone {
   width: 100%;
-  max-width: 440px;
-  min-height: 100vh;
-  padding: 24px 16px;
+  max-width: 27.5rem;
+  height: 100vh;
+  height: 100dvh;
+  padding: 1.25rem 1rem;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 0.875rem;
   background: var(--surface);
   border-inline: 1px solid var(--border);
 }
@@ -53,53 +77,165 @@ body {
 h1 {
   margin: 0;
   font-size: 1.4rem;
+  line-height: 1.35;
 }
 
 .subtitle {
-  margin: 4px 0 0;
+  margin: 0.25rem 0 0;
   color: var(--muted);
   font-size: 0.9rem;
 }
 
 .status {
-  padding: 10px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  color: var(--muted);
+  flex: none;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 0.875rem;
+  min-height: 5.25rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  border: 2px solid var(--border);
+  background: var(--bg);
 }
 
+.status-main {
+  display: block;
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.status-sub {
+  display: block;
+  font-size: 0.95rem;
+}
+
+/* The caller's colour when it is their turn, the agent's when it is the agent's. */
 .status-listening {
-  color: var(--accent);
-  border-color: var(--accent);
+  color: var(--on-listening);
+  background: var(--listening);
+  border-color: var(--listening);
 }
 
 .status-agent-speaking {
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.status-idle,
+.status-ended {
+  color: var(--muted);
+}
+
+.status-ended .status-main,
+.status-idle .status-main {
   color: var(--text);
-  border-color: var(--text);
+}
+
+.status-mark {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  height: 2.25rem;
+}
+
+.status-idle .status-mark,
+.status-ended .status-mark {
+  display: none;
+}
+
+.status-mark span {
+  width: 0.35rem;
+  height: 100%;
+  border-radius: 999px;
+  background: currentColor;
+  transform: scaleY(0.25);
+}
+
+.status-listening .status-mark span {
+  animation: status-pulse 1.6s ease-in-out infinite;
+}
+
+.status-agent-speaking .status-mark span {
+  animation: status-wave 0.9s ease-in-out infinite;
+}
+
+.status-connecting .status-mark span {
+  animation: status-wave 1.2s ease-in-out infinite;
+  opacity: 0.7;
+}
+
+.status-mark span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.status-mark span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes status-wave {
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes status-pulse {
+  50% {
+    transform: scaleY(0.6);
+  }
 }
 
 .error {
   margin: 0;
-  color: var(--danger);
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--danger);
+  border-inline-start-width: 0.35rem;
+  border-radius: 0.5rem;
+  background: var(--danger-bg);
+  color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 .transcript {
   flex: 1;
+  min-height: 0;
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0.5rem;
   overflow-y: auto;
 }
 
+.transcript:empty {
+  display: none;
+}
+
+.hint {
+  flex: 1;
+  margin: 0;
+  color: var(--muted);
+  text-align: center;
+  align-content: center;
+}
+
+.hint-main {
+  display: block;
+  color: var(--text);
+  font-size: 1.15rem;
+  line-height: 1.6;
+}
+
 .transcript li {
-  padding: 10px 12px;
-  border-radius: 10px;
+  flex: none;
+  padding: 0.625rem 0.75rem;
+  border-radius: 0.625rem;
   display: grid;
-  gap: 2px;
-  max-width: 85%;
+  gap: 0.125rem;
+  max-width: 88%;
 }
 
 .transcript .caller {
@@ -114,34 +250,42 @@ h1 {
 
 .who,
 .latency {
-  font-size: 0.75rem;
+  font-size: 0.85rem;
   color: var(--muted);
 }
 
+.who {
+  font-weight: 600;
+}
+
+/* Kannada stacks consonants below the line: it needs more room than Latin text. */
 .text {
-  font-size: 1.05rem;
-  line-height: 1.5;
+  font-size: 1.15rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
 }
 
 .noise {
+  flex: none;
   margin: 0;
   padding: 0;
   border: none;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 0.375rem;
 }
 
 .noise legend {
   float: left;
-  margin-inline-end: 4px;
+  margin-inline-end: 0.25rem;
   font-size: 0.85rem;
   color: var(--muted);
 }
 
 .noise label {
-  padding: 6px 12px;
+  position: relative;
+  padding: 0.375rem 0.75rem;
   border: 1px solid var(--border);
   border-radius: 999px;
   font-size: 0.85rem;
@@ -163,7 +307,7 @@ h1 {
 }
 
 .noise label:has(input:focus-visible) {
-  outline: 3px solid var(--text);
+  outline: 0.2rem solid var(--text);
   outline-offset: 2px;
 }
 
@@ -171,6 +315,15 @@ h1 {
 @media (forced-colors: active) {
   .noise label:has(input:checked) {
     border: 2px solid Highlight;
+  }
+
+  .status-listening,
+  .status-agent-speaking {
+    border-color: Highlight;
+  }
+
+  .status-mark span {
+    background: CanvasText;
   }
 }
 
@@ -188,22 +341,44 @@ button {
   font: inherit;
   font-size: 1.1rem;
   font-weight: 600;
-  padding: 14px;
+  padding: 0.875rem;
   border: none;
   border-radius: 999px;
-  color: #fff;
+  color: var(--on-accent);
   cursor: pointer;
+}
+
+.phone > button {
+  flex: none;
 }
 
 button.call {
   background: var(--accent);
+  color: var(--on-accent);
 }
 
 button.hang-up {
   background: var(--danger);
+  color: var(--on-danger);
 }
 
-button:focus-visible {
-  outline: 3px solid var(--text);
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: 0.2rem solid var(--text);
   outline-offset: 2px;
+}
+
+/* The longest status takes two lines on a phone: keep room for them, so the transcript stays put. */
+@media (max-width: 480px) {
+  .status {
+    min-height: 7.25rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-mark span {
+    animation: none !important;
+  }
 }

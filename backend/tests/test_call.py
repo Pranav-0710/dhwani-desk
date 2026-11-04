@@ -9,7 +9,7 @@ import pytest
 from fakes import ROADS_IN_W04, FakeStream, ScriptedBrowser, ScriptedDecider, use_fakes
 
 import app as app_module
-from audio.speaker import Speaker
+from audio.speaker import TTS_FAILED, Speaker
 from dialogue.decision import Decision, Screening
 from gnani.prisma import PrismaClosed, PrismaRejected, SttEvent
 from gnani.timbre import TimbreError
@@ -70,7 +70,7 @@ def test_speaker_frames_each_line_and_survives_a_tts_failure() -> None:
     assert outbox.sent == [
         {"type": "agent_text", "text": "broken"},
         {"type": "agent_audio_start", "sample_rate": 16000},
-        {"type": "tts_error", "message": "Timbre SERVICE_UNAVAILABLE: busy (HTTP 503)"},
+        {"type": "tts_error", "message": TTS_FAILED},
         {"type": "agent_audio_end"},
         {"type": "agent_text", "text": "ಸರಿ"},
         {"type": "agent_audio_start", "sample_rate": 16000},
@@ -236,6 +236,28 @@ def test_a_call_gives_up_when_prisma_keeps_failing(monkeypatch: pytest.MonkeyPat
 
     assert len(attempts) == app_module.STT_RECONNECTS + 1
     assert browser.closed_with == 1011
+
+
+def test_a_new_prisma_session_does_not_earn_the_call_more_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    use_dialogue_fakes(monkeypatch, FakeTts())
+    monkeypatch.setattr(app_module, "STT_RECONNECT_DELAY_S", 0.01)
+    monkeypatch.setattr(app_module, "stt_max_session_s", 0.15)
+
+    class DropsSoon(FakeStream):
+        async def __aenter__(self):
+            asyncio.get_running_loop().call_later(0.1, self.close_cleanly, 1000, "")
+            return await super().__aenter__()
+
+    monkeypatch.setattr(app_module, "stt_stream_factory", lambda settings: DropsSoon())
+    browser = ScriptedBrowser([], leave_when=lambda sent: False)
+
+    asyncio.run(app_module.call(browser))
+
+    # One limit across the sessions; each alone stays well under it.
+    assert browser.sent[-1] == app_module.TOO_LONG
+    assert browser.closed_with == 1008
 
 
 def test_a_rejected_key_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -542,7 +564,7 @@ def test_unexpected_tts_failure_still_ends_the_line_and_keeps_going() -> None:
     assert outbox.sent[:4] == [
         {"type": "agent_text", "text": "bad"},
         {"type": "agent_audio_start", "sample_rate": 16000},
-        {"type": "tts_error", "message": "KeyError"},
+        {"type": "tts_error", "message": TTS_FAILED},
         {"type": "agent_audio_end"},
     ]
     assert outbox.sent[4] == {"type": "agent_text", "text": "ಸರಿ"}
@@ -556,10 +578,7 @@ def test_call_reports_tts_error_and_keeps_the_call_open(monkeypatch: pytest.Monk
 
     asyncio.run(app_module.call(browser))
 
-    assert {
-        "type": "tts_error",
-        "message": "Timbre SERVICE_UNAVAILABLE: busy (HTTP 503)",
-    } in browser.sent
+    assert {"type": "tts_error", "message": TTS_FAILED} in browser.sent
     # The failed greeting is not cached, and the call still answers the caller's turn.
     assert tts.spoken == [app_module.TEMPLATES.lines["ask_problem"]]
     assert browser.closed_with is None  # the browser left; the server never closed the call

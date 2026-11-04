@@ -1,8 +1,12 @@
 import asyncio
+import collections
 import contextlib
 import functools
 import hmac
+import ipaddress
+import json
 import logging
+import time
 from collections.abc import Awaitable, Callable, Iterator
 from typing import Any
 
@@ -42,7 +46,8 @@ from tickets.store import FIRST_NUMBER, TicketStore
 
 logger = logging.getLogger("dhwani.stt")
 
-# How often transcripts past TRANSCRIPT_RETENTION_DAYS are deleted.
+# How often transcripts past TRANSCRIPT_RETENTION_DAYS are deleted, and ticket locations past
+# TICKET_LOCATION_RETENTION_DAYS blanked.
 RETENTION_SWEEP_S = 3600.0
 
 
@@ -64,15 +69,21 @@ def get_decider() -> Decider:
 
 
 async def _purge_old_transcripts() -> None:
-    days = get_settings().transcript_retention_days
+    settings = get_settings()
+    days = settings.transcript_retention_days
+    location_days = settings.ticket_location_retention_days
+    store = get_ticket_store()
     try:
-        purged = await asyncio.to_thread(get_ticket_store().purge_transcripts, days)
+        purged = await asyncio.to_thread(store.purge_transcripts, days)
+        blanked = await asyncio.to_thread(store.purge_ticket_locations, location_days)
     except Exception:
         # One failed pass (a locked database) must not end retention for good.
         logger.exception("Deleting old caller turns failed; trying again later")
     else:
         if purged:
             logger.info("Deleted %d caller turns older than %d days", purged, days)
+        if blanked:
+            logger.info("Blanked %d ticket locations older than %d days", blanked, location_days)
 
 
 async def _sweep_transcripts() -> None:
@@ -143,8 +154,10 @@ HANG_UP_GRACE_S = 0.5
 # call opens a new one this many times before giving up.
 STT_RECONNECTS = 3
 STT_RECONNECT_DELAY_S = 0.5
-# A console must say hello with the token within this long.
+# A console must say hello with the token within this long. Longer than any real hello, which is
+# under 100 characters: the limit is read before the text is parsed, for a stranger's socket.
 CONSOLE_HELLO_TIMEOUT_S = 5.0
+MAX_HELLO_CHARS = 4096
 # Longest a console waits for a call to carry out an officer command (a decision may be
 # running on the call).
 OFFICER_COMMAND_TIMEOUT_S = 10.0
@@ -154,31 +167,108 @@ live_calls = LiveCalls()
 
 
 class SessionCount:
-    """Browser sessions streaming to Prisma right now: each one spends our Gnani credits."""
+    """Sockets holding one of a few places right now: browser sessions streaming to Prisma, which
+    spend our Gnani credits, and consoles."""
 
     def __init__(self) -> None:
         self.open = 0
+        self.by_client: collections.Counter[str] = collections.Counter()
 
     @contextlib.contextmanager
-    def hold(self, limit: int) -> Iterator[bool]:
+    def hold(self, limit: int, client: str = "", per_client: int = 0) -> Iterator[bool]:
         """Count one session while the block runs. Yields False, counting nothing, when
-        `limit` are already open."""
-        if self.open >= limit:
+        `limit` are already open, or `per_client` (if set) from this `client`."""
+        if self.open >= limit or (per_client and self.by_client[client] >= per_client):
             yield False
             return
         self.open += 1
+        self.by_client[client] += 1
         try:
             yield True
         finally:
             self.open -= 1
+            self.by_client[client] -= 1
+            if not self.by_client[client]:
+                del self.by_client[client]
+
+
+class CallBudget:
+    """The ceiling on what the public line may spend, however calls are spread over time: the
+    minutes on the line across all callers in a rolling day, and the calls one caller may start
+    in a rolling hour. In memory, so restarting the backend starts them afresh.
+
+    Minutes, not calls: credits go by the audio second, and two lines of ten-minute calls need
+    only 12 calls an hour to run all day. A call in progress is counted when it ends, so the
+    ceiling can be passed by the calls on the line when it is reached, which are never cut.
+    """
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._calls: collections.deque[tuple[float, str]] = collections.deque()
+        self._by_client: collections.Counter[str] = collections.Counter()
+        self._line_time: collections.deque[tuple[float, float]] = collections.deque()
+        self._line_seconds = 0.0
+
+    def admit(self, client: str, calls_per_hour: int, minutes_per_day: int) -> str | None:
+        """Count a new call from `client`, or return why it is refused, counting nothing. A limit
+        of 0 is off."""
+        now = self._clock()
+        while self._calls and now - self._calls[0][0] >= 3600.0:
+            _, gone = self._calls.popleft()
+            self._by_client[gone] -= 1
+            if not self._by_client[gone]:
+                del self._by_client[gone]
+        while self._line_time and now - self._line_time[0][0] >= 86400.0:
+            self._line_seconds -= self._line_time.popleft()[1]
+        if minutes_per_day and self._line_seconds >= minutes_per_day * 60:
+            return f"{minutes_per_day} minutes on the line in the last 24 hours"
+        if calls_per_hour and self._by_client[client] >= calls_per_hour:
+            return f"{calls_per_hour} calls from one caller in the last hour"
+        self._calls.append((now, client))
+        self._by_client[client] += 1
+        return None
+
+    def charge(self, seconds: float) -> None:
+        """Add the length of a call that has just ended."""
+        self._line_time.append((self._clock(), seconds))
+        self._line_seconds += seconds
+
+
+def _client(websocket: WebSocket) -> str:
+    """Who is calling: the address nginx passes in X-Real-IP (Cloudflare's client IP behind the
+    tunnel), or the socket's peer when there is no nginx in front (local development). All of an
+    IPv6 /64 counts as one caller: it is one household or phone, and it has more addresses than
+    any limit per address could mean anything against."""
+    address = websocket.headers.get("x-real-ip")
+    if not address:
+        peer = getattr(websocket, "client", None)
+        address = peer.host if peer else ""
+    with contextlib.suppress(ValueError):
+        if ipaddress.ip_address(address).version == 6:
+            return str(ipaddress.ip_network((address, 64), strict=False))
+    return address
 
 
 stt_sessions = SessionCount()
+call_budget = CallBudget()
+console_hellos = SessionCount()
+open_consoles = SessionCount()
 LINE_BUSY = {"type": "error", "message": "The line is busy; please try again in a minute"}
-# A session that sends no audio this long is ended, so a socket left open and silent cannot
-# hold one of the few sessions. The phone page streams all the time, silence included.
+LINE_RESTING = {
+    "type": "error",
+    "message": "The helpline has taken all the calls it can for now; please try again later",
+}
+TOO_MANY_CONSOLES = {"type": "error", "message": "Too many consoles are open"}
+# A session that sends too little audio over this long is ended, so a socket left open and silent,
+# or sending a byte now and then, cannot hold one of the few sessions. The phone page streams all
+# the time, silence included. How little is too little: MIN_AUDIO_SHARE.
 stt_quiet_s = 30.0
 WENT_QUIET = {"type": "error", "message": "No audio arrived for too long; call ended"}
+STT_FAILED = {"type": "error", "message": "Speech recognition is unavailable; call ended"}
+# The longest one session may last, so a script streaming silence cannot hold a session (and
+# spend credits) for ever. A real complaint call takes a minute or two.
+stt_max_session_s = 600.0
+TOO_LONG = {"type": "error", "message": "The call reached its time limit; call ended"}
 
 TEMPLATES = load_templates()
 TTS_CACHE: AudioCache = {}
@@ -197,10 +287,15 @@ def _is_console_token(offered: object) -> bool:
     return hmac.compare_digest(offered.encode(), token.encode())
 
 
-def officers_only(authorization: str | None = Header(None)) -> None:
+def officers_only(
+    authorization: str | None = Header(None), cf_connecting_ip: str | None = Header(None)
+) -> None:
     """The console's HTTP routes need the console's token, as `Authorization: Bearer <token>`:
     tickets hold where callers live, and the tunnel makes the backend public."""
-    if not get_settings().console_token.get_secret_value():
+    settings = get_settings()
+    if settings.console_local_only and cf_connecting_ip is not None:
+        raise HTTPException(status_code=404, detail="Not Found")
+    if not settings.console_token.get_secret_value():
         raise HTTPException(status_code=503, detail="CONSOLE_TOKEN is not set")
     scheme, _, offered = (authorization or "").partition(" ")
     if scheme.lower() != "bearer" or not _is_console_token(offered.strip()):
@@ -232,26 +327,64 @@ def get_thresholds() -> dict[str, Any]:
 async def console(websocket: WebSocket) -> None:
     """A supervisor console: watch every live call, take one over, speak on it, hand it back.
 
-    Contract (see backend/README.md): the console first sends `hello` with `CONSOLE_TOKEN`.
-    It then gets `calls` (every live call, and the thresholds), followed by `call_started`,
-    `call_event` (a message the caller's browser got) and `call_closed` as they happen. It may
-    send `take_over`, `say` (`text`) and `hand_back`, each with a `call_id` and an optional `id`
-    echoed in the answer: `done`, or `error` with a `message`.
+    Contract (see backend/README.md): only pages on ALLOWED_ORIGINS may connect. The console first
+    sends `hello` with `CONSOLE_TOKEN`. It then gets `calls` (every live call, and the thresholds),
+    followed by `call_started`, `call_event` (a message the caller's browser got, with the caller's
+    numbers masked) and `call_closed` as they happen. It may send `take_over`, `say` (`text`) and
+    `hand_back`, each with a `call_id` and an optional `id` echoed in the answer: `done`, or `error`
+    with a `message`.
     """
-    await websocket.accept()
-    token = get_settings().console_token.get_secret_value()
-    if not token:
-        await _fail(websocket, "CONSOLE_TOKEN is not set")
+    settings = get_settings()
+    client = _client(websocket)
+    if settings.console_local_only and "cf-connecting-ip" in websocket.headers:
+        await websocket.close(code=1008)
         return
-    try:
-        hello = await asyncio.wait_for(websocket.receive_json(), CONSOLE_HELLO_TIMEOUT_S)
-    except (TimeoutError, WebSocketDisconnect, KeyError, ValueError):
-        hello = None
+    if not _page_allowed(websocket, settings):
+        await websocket.close(code=1008)
+        return
+    with console_hellos.hold(
+        settings.max_console_hellos, client, settings.max_console_hellos_per_client
+    ) as held:
+        if not held:
+            logger.warning("Refused a console socket: too many are still to say hello")
+            await websocket.close(code=1008)
+            return
+        await websocket.accept()
+        if not settings.console_token.get_secret_value():
+            await _fail(websocket, "CONSOLE_TOKEN is not set")
+            return
+        hello = await _read_hello(websocket)
     is_hello = isinstance(hello, dict) and hello.get("type") == "hello"
     if not _is_console_token(hello.get("token") if is_hello else None):
         await _send_and_close(websocket, {"type": "error", "message": "Not allowed"}, code=1008)
         return
+    # Warned, not just logged: how an owner notices a token in use that should not be.
+    logger.warning("A console signed in from %r", client)
+    with open_consoles.hold(settings.max_consoles) as room:
+        if not room:
+            await _send_and_close(websocket, TOO_MANY_CONSOLES, code=1013)
+            return
+        await _serve_console(websocket)
 
+
+async def _read_hello(websocket: WebSocket) -> Any:
+    """A console's first message, parsed, or None if it is not there in time, not text, too long
+    or not JSON. Not yet known to be from an officer, so its size is checked before parsing it."""
+    try:
+        message = await asyncio.wait_for(websocket.receive(), CONSOLE_HELLO_TIMEOUT_S)
+    except TimeoutError:
+        return None
+    text = message.get("text")
+    if not isinstance(text, str) or len(text) > MAX_HELLO_CHARS:
+        return None
+    try:
+        return json.loads(text)
+    except (ValueError, RecursionError):
+        return None
+
+
+async def _serve_console(websocket: WebSocket) -> None:
+    """The signed-in part of the console's socket."""
     outbox = Outbox(websocket)
     with live_calls.watch() as watcher:
         calls = [call.summary() for call in live_calls]
@@ -317,18 +450,23 @@ async def _carry_out(message: Any) -> dict[str, Any]:
 async def stt_proxy(websocket: WebSocket) -> None:
     """Relay browser audio to Prisma and Prisma's transcripts back to the browser.
 
-    Contract (see backend/README.md): only pages on ALLOWED_ORIGINS may connect, and only
+    Off unless STT_RELAY_ENABLED is set: the phone page only uses /ws/call. Contract (see
+    backend/README.md): only pages on ALLOWED_ORIGINS may connect, and only
     MAX_STT_SESSIONS at once across /ws/stt and /ws/call. After `config` and `connected`
     arrive, the browser streams binary frames of 16-bit mono PCM at `config.sample_rate`, in
     real time, and may send the text frame "flush". It receives JSON events; `closed` or
     `error` followed by a close ends the session.
     """
     settings = get_settings()
+    if not settings.stt_relay_enabled:
+        logger.warning("Refused a socket on /ws/stt: STT_RELAY_ENABLED is off")
+        await websocket.close(code=1008)
+        return
     if not await _admit(websocket, settings):
         return
-    with stt_sessions.hold(settings.max_stt_sessions) as held:
-        if not held:
-            await _line_busy(websocket)
+    with _take_line(websocket, settings) as refusal:
+        if refusal:
+            await _send_and_close(websocket, refusal, code=1013)
             return
         outbox = Outbox(websocket)
 
@@ -358,9 +496,9 @@ async def call(websocket: WebSocket) -> None:
     settings = get_settings()
     if not await _admit(websocket, settings):
         return
-    with stt_sessions.hold(settings.max_stt_sessions) as held:
-        if not held:
-            await _line_busy(websocket)
+    with _take_line(websocket, settings) as refusal:
+        if refusal:
+            await _send_and_close(websocket, refusal, code=1013)
             return
         store = get_ticket_store()
         dialogue = Dialogue(TEMPLATES, get_decider(), store)
@@ -500,7 +638,10 @@ async def _converse(
                 await hand_off_on_failure()
                 return
             await store_turn(decision.contains_personal_id)
-            await answer(dialogue.respond(decision))
+            # In a thread: a reply that closes the call files the ticket, a SQLite write that can
+            # wait on the store's lock (a purge, another call's turn) and would stall every call.
+            # Only this task changes the dialogue, so nothing else races it meanwhile.
+            await answer(await asyncio.to_thread(dialogue.respond, decision))
 
         async def obey(command: OfficerCommand) -> None:
             if command.done.done():
@@ -509,7 +650,10 @@ async def _converse(
                 if command.kind == "take_over":
                     await answer(dialogue.take_over(), show=True)
                 elif command.kind == "say":
-                    speaker.say(dialogue.officer_says(command.text))
+                    line = dialogue.officer_says(command.text)
+                    if speaker.queued >= settings.max_officer_lines_queued:
+                        raise OfficerError("Wait for the last line to be spoken")
+                    speaker.say(line)
                 else:
                     await answer(dialogue.hand_back())
                 if not command.done.done():
@@ -585,6 +729,8 @@ async def _converse(
         background.append(asyncio.create_task(collect(turns.turns)))
         background.append(asyncio.create_task(collect(live.commands)))
         background.append(asyncio.create_task(answer_turns()))
+        # For the whole call: a new Prisma session does not earn a caller more time.
+        ends_at = asyncio.get_running_loop().time() + stt_max_session_s
         try:
             for attempt in range(STT_RECONNECTS + 1):
                 failures: list[PrismaError] = []
@@ -597,6 +743,7 @@ async def _converse(
                     stop=agent_hung_up,
                     on_barge_in=barge_in,
                     failures=failures,
+                    ends_at=ends_at,
                 )
                 # Retry only what a new session can fix: Prisma closing on its own, or a failed
                 # connect. A rejected key or an audio overflow would fail again the same way.
@@ -632,32 +779,37 @@ async def _stt_session(
     stop: asyncio.Event | None = None,
     on_barge_in: Callable[[], None] | None = None,
     failures: list[PrismaError] | None = None,
+    ends_at: float | None = None,
 ) -> FinalMessage | None:
     """Run one Prisma session for this socket. Returns the message to end the session with,
     or None when the browser left or `stop` was set (the caller has nothing more to send).
     A Prisma failure is also appended to `failures`, for a caller deciding whether to retry."""
+    # 16-bit audio, so two bytes a sample.
+    min_audio = int(settings.gnani_stt_sample_rate * 2 * stt_quiet_s * settings.min_audio_share)
     try:
         async with stt_stream_factory(settings) as stream:
             await outbox.json(config)
-            ended_by = await _relay(websocket, stream, on_event, stop, on_barge_in)
+            ended_by = await _relay(
+                websocket, stream, on_event, stop, on_barge_in, min_audio, ends_at
+            )
             if ended_by in ("browser", "agent"):
                 stream.discard_pending()
                 return None
             if ended_by == "quiet":
                 stream.discard_pending()
                 return WENT_QUIET, 1008
-        closed = {
-            "type": "closed",
-            "by": "prisma",
-            "code": stream.close_code,
-            "reason": stream.close_reason,
-        }
-        return closed, 1000
+            if ended_by == "too_long":
+                stream.discard_pending()
+                return TOO_LONG, 1008
+        # The reason is Prisma's own text, which may name the account or its quota: log only.
+        logger.warning("Prisma closed the session: %s %s", stream.close_code, stream.close_reason)
+        return {"type": "closed", "by": "prisma", "code": stream.close_code}, 1000
     except PrismaError as exc:
         logger.warning("STT session failed: %s", exc)
         if failures is not None:
             failures.append(exc)
-        return {"type": "error", "message": str(exc)}, 1011
+        # The detail (Prisma's own close reason, account or quota text) stays in the log.
+        return STT_FAILED, 1011
     except WebSocketDisconnect:
         return None
 
@@ -668,30 +820,50 @@ async def _relay(
     on_event: EventHandler,
     stop: asyncio.Event | None = None,
     on_barge_in: Callable[[], None] | None = None,
+    min_audio: int = 0,
+    ends_at: float | None = None,
 ) -> str:
     """Pump audio up and events down until one side ends or `stop` is set; returns "browser",
-    "prisma", "agent" or "quiet" (no audio for `stt_quiet_s`). A `barge_in` text frame (the
-    caller spoke over the agent) goes to `on_barge_in`."""
-    went_quiet = False
+    "prisma", "agent", "quiet" (under `min_audio` bytes of audio in `stt_quiet_s`, or none at all)
+    or "too_long" (`ends_at` came, by default `stt_max_session_s` from now). A `barge_in` text
+    frame (the caller spoke over the agent) goes to `on_barge_in`."""
+    went_quiet = too_long = False
 
     async def pump_audio() -> None:
-        nonlocal went_quiet
+        nonlocal went_quiet, too_long
         loop = asyncio.get_running_loop()
         deadline = loop.time() + stt_quiet_s
+        end_of_session = loop.time() + stt_max_session_s if ends_at is None else ends_at
+        # Audio since `deadline` was last set. The first audio sets it afresh: the mic opens only
+        # once the caller has answered the browser's permission prompt.
+        heard = 0
+        any_audio = False
         while True:
-            quiet = asyncio.timeout_at(deadline)
+            quiet = asyncio.timeout_at(min(deadline, end_of_session))
             try:
                 async with quiet:
                     message = await websocket.receive()
             except TimeoutError:
                 if not quiet.expired():
                     raise
-                went_quiet = True
-                return
+                # By which limit the timer was set, not the clock: timers can fire a tick early.
+                too_long = end_of_session <= deadline
+                went_quiet = not too_long and (heard == 0 or heard < min_audio)
+                if too_long or went_quiet:
+                    return
+                heard = 0
+                deadline = loop.time() + stt_quiet_s
+                continue
             if message["type"] == "websocket.disconnect":
                 return
+            if loop.time() >= end_of_session:
+                too_long = True
+                return
             if message.get("bytes"):
-                deadline = loop.time() + stt_quiet_s
+                if not any_audio:
+                    any_audio = True
+                    deadline = loop.time() + stt_quiet_s
+                heard += len(message["bytes"])
                 await stream.send_audio(message["bytes"])
             elif message.get("text") == "flush":
                 await stream.flush()
@@ -711,6 +883,8 @@ async def _relay(
         for task in done:
             task.result()
         if audio in done:
+            if too_long:
+                return "too_long"
             return "quiet" if went_quiet else "browser"
         return "prisma" if events in done else "agent"
     finally:
@@ -719,17 +893,25 @@ async def _relay(
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
+def _page_allowed(websocket: WebSocket, settings: Settings) -> bool:
+    """Whether the page opening this socket is on ALLOWED_ORIGINS. Origin stops other web pages,
+    not a script that forges it."""
+    origin = websocket.headers.get("origin")
+    if origin in settings.origins:
+        return True
+    logger.warning("Refused a socket from origin %r", origin)
+    return False
+
+
 async def _admit(websocket: WebSocket, settings: Settings) -> bool:
     """Accept a call socket (/ws/stt, /ws/call), or close it and return False.
 
     A page not on ALLOWED_ORIGINS is refused before the handshake completes: closing with
     1008 before accepting makes the server answer HTTP 403, so the browser only sees a failed
-    connection. Origin stops other web pages, not a script that forges it; the session cap
-    bounds what such a script can spend.
+    connection. The session cap and the credit ceiling (`_take_line`) bound what a script that
+    forges Origin can spend.
     """
-    origin = websocket.headers.get("origin")
-    if origin not in settings.origins:
-        logger.warning("Refused a call socket from origin %r", origin)
+    if not _page_allowed(websocket, settings):
         await websocket.close(code=1008)
         return False
     await websocket.accept()
@@ -739,10 +921,31 @@ async def _admit(websocket: WebSocket, settings: Settings) -> bool:
     return True
 
 
-async def _line_busy(websocket: WebSocket) -> None:
-    logger.warning("Refused a call: all %d STT sessions are in use", stt_sessions.open)
-    # 1013: try again later.
-    await _send_and_close(websocket, LINE_BUSY, code=1013)
+@contextlib.contextmanager
+def _take_line(websocket: WebSocket, settings: Settings) -> Iterator[dict[str, Any] | None]:
+    """Hold one of the lines for this socket, and charge the time to the credit ceiling, while the
+    block runs. Yields the message to refuse the call with (close 1013, try again later), before
+    Prisma is opened, when there is no line free or the ceiling is reached; otherwise None."""
+    client = _client(websocket)
+    with stt_sessions.hold(
+        settings.max_stt_sessions, client, settings.max_sessions_per_client
+    ) as held:
+        if not held:
+            logger.warning("Refused a call: all %d STT sessions are in use", stt_sessions.open)
+            yield LINE_BUSY
+            return
+        reason = call_budget.admit(
+            client, settings.max_calls_per_client_per_hour, settings.max_call_minutes_per_day
+        )
+        if reason:
+            logger.warning("Refused a call: the credit ceiling is reached (%s)", reason)
+            yield LINE_RESTING
+            return
+        started = time.monotonic()
+        try:
+            yield None
+        finally:
+            call_budget.charge(time.monotonic() - started)
 
 
 async def _send_and_close(websocket: WebSocket, payload: dict[str, Any], code: int) -> None:

@@ -27,16 +27,19 @@ npm run build
 - `src/audio/mic.ts` — captures the mic (echo cancellation on), low-pass filters and downsamples to the backend's rate (8 kHz), mixes in any line noise and sends 16-bit PCM in ~40 ms batches.
 - `src/audio/noise.ts` — the **Line noise** toggle: pink background noise at about −34 dBFS ("Quiet street") or −24 dBFS ("Busy street"). It is added after the browser's own noise suppression, so speech recognition hears all of it, and can be changed during a call.
 - `src/audio/player.ts` — plays the agent's streamed PCM gap-free.
+- `src/call/error-text.ts` — turns the client's errors into what the caller should do next.
 - `src/call/call-client.ts` — one call over `/ws/call`. The mic sends no caller sound while the agent speaks and until its audio has finished playing (plus 300 ms), so the bot never answers itself. Any line noise carries on through that time, as on a real line. If the caller talks over the agent anyway (their own level, after the browser's echo cancellation, at RMS ≥ 0.04 for 160 ms), playback stops, the mic opens and the page sends `barge_in`, so the backend cuts the line and takes what the caller says as the next turn (#10). Speakers loud enough to beat the echo cancellation can trigger it; a headset avoids that.
 
 ## Supervisor console (`/supervisor`)
 
 Open http://localhost:5173/supervisor and enter the console token (`CONSOLE_TOKEN` in the backend's `.env`; the console is off while it is empty). The token is kept for the browser tab only.
 
-- **Live calls:** every call in progress, newest first. A call waiting for an officer is marked red, and a banner says why (safety risk, caller asked for an officer, distressed, could not route…). The console opens on that call.
-- **Transcript:** the caller's words as Prisma hears them, the agent's lines, and what an officer typed, as it is spoken.
-- **Decision bars:** Laya's probability for each question, with the backend's threshold marked (`/ws/console` sends them with the calls). Safety risk, a request for an officer and "not a civic matter" turn red past their threshold, because the call is then handed off or redirected. When a call is handed off on the safety step, the bars show that step until the rest of the decision arrives.
-- **Officer:** **Take over** gives the officer the call. **Say** speaks the typed line in the agent's voice (up to 300 characters). **Hand back to the agent** returns the call. Each waits for the backend's answer and shows its error, e.g. a call that has just ended.
+- **Live calls:** every call in progress, most pressing first: waiting for an officer (safety risks ahead of the rest, then the longest-waiting), with an officer, with the agent, then ended. A call waiting for an officer is marked red, and a banner says why (safety risk, caller asked for an officer, distressed, could not route…), solid red for a safety risk. The console opens on that call. The banner shows the call and moves the keyboard to its **Take over**.
+- **Transcript:** the caller's words as Prisma hears them, with any run of four or more digits masked by the backend, the agent's lines, and what an officer typed, as it is spoken.
+- **Decision bars:** Laya's probability for each question, with the backend's threshold marked (`/ws/console` sends them with the calls). Safety risk, a request for an officer and "not a civic matter" turn red and say so past their threshold, because the call is then handed off or redirected; the others turn from grey to green. When a call is handed off on the safety step, the bars show that step until the rest of the decision arrives.
+- **Officer:** **Take over** gives the officer the call. **Say** speaks the typed line in the agent's voice (up to 300 characters). **Hand back to the agent** returns the call. Each waits for the backend's answer and shows its error, e.g. a call that has just ended. The controls sit above the transcript, and the keyboard follows them: Take over lands on the line to type, Hand back on Take over.
 - **Tickets:** the newest 200 from `/api/tickets`, refreshed every 10 s and whenever a call ends, filterable by department, ward and urgency. Requests carry the token as `Authorization: Bearer`, for when the backend checks it.
+
+Both pages size everything in `rem` from a root that grows only when the window is both wide and tall in CSS pixels (`index.css`), which is what zooming out does, so they stay readable when filmed at 50% browser zoom and keep normal text at 100%.
 
 Code: `src/supervisor/` (`protocol.ts` turns the server's messages into the page's state and is tested without a browser; `console-client.ts` is the socket; `Supervisor.tsx` is the page). The protocol itself is in `../backend/README.md`, "Supervisor console".

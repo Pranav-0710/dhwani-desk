@@ -30,7 +30,7 @@ type ServerMessage =
   | { type: 'agent_audio_start'; sample_rate: number }
   | { type: 'agent_audio_end'; interrupted?: boolean }
   | { type: 'tts_error'; message: string }
-  | { type: 'closed'; reason: string }
+  | { type: 'closed' }
   | { type: 'error'; message: string }
   | { type: 'dialogue'; state: string }
 
@@ -144,7 +144,9 @@ export class CallClient {
       case 'connected':
         if (this.micRequested) break
         this.micRequested = true
-        if (await this.openMic()) this.emitStatus('listening')
+        // The greeting may be playing once the permission prompt is answered, even if all of it
+        // has arrived; `listening` then waits for the timer set when its audio ended.
+        if ((await this.openMic()) && !this.muted()) this.emitStatus('listening')
         break
       case 'transcript':
         this.onEvent({ type: 'caller', text: message.text, latencyMs: message.latency_ms })
@@ -164,17 +166,19 @@ export class CallClient {
         this.emitStatus('agent-speaking')
         break
       case 'agent_audio_end':
-        // After a barge-in the caller is talking: do not mute them for the cut line's tail.
-        if (!this.interrupted) this.onAgentAudioEnd()
+        if (message.interrupted) {
+          // The server cut this line for a barge-in. It may be a line that started after
+          // the barge-in left (a race): stop it too, and never mute the caller for its tail.
+          this.cutAgent()
+        } else if (!this.interrupted) {
+          this.onAgentAudioEnd()
+        }
         break
       case 'tts_error':
         this.onEvent({ type: 'error', message: `Agent voice failed: ${message.message}` })
         break
       case 'closed':
-        this.onEvent({
-          type: 'error',
-          message: `Speech service ended the call${message.reason ? ` (${message.reason})` : ''}`,
-        })
+        this.onEvent({ type: 'error', message: 'Speech service ended the call' })
         break
       case 'error':
         this.onEvent({ type: 'error', message: message.message })
@@ -236,13 +240,20 @@ export class CallClient {
   }
 
   private bargeIn(): void {
+    this.cutAgent()
+    if (this.socket?.readyState === SOCKET_OPEN) this.socket.send('barge_in')
+    // What the caller said while muted, before barge-in could be sure: their first syllables.
+    for (const pcm of this.mic?.takeRecent?.() ?? []) this.sendMic(pcm)
+  }
+
+  /** Stop the agent's line at once and give the caller the line. */
+  private cutAgent(): void {
     this.loudSince = null
     this.interrupted = true
     this.agentSpeaking = false
     this.mutedUntil = 0
     this.player?.stop()
     this.clearListeningTimer()
-    if (this.socket?.readyState === SOCKET_OPEN) this.socket.send('barge_in')
     this.emitStatus('listening')
   }
 

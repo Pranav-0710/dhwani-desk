@@ -13,10 +13,17 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from dialogue.machine import Dialogue
+from tickets.masking import mask_turns
 
 # Messages queued for a console that has stopped reading before it is cut off: it reconnects
 # and starts again from the list of calls.
 MAX_BACKLOG = 1000
+# Consoles see the caller's words with any run of four or more digits masked, as if a personal
+# number had been said: live, no decision says otherwise yet, and an officer does not need it.
+CONSOLE_PERSONAL_ID = 1.0
+# How many of a call's latest transcript segments are masked together, so a number spread over
+# segments ("98450", then "12345") is caught.
+SEGMENTS_MASKED_TOGETHER = 8
 
 CommandKind = Literal["take_over", "say", "hand_back"]
 
@@ -41,6 +48,13 @@ class LiveCall:
     dialogue: Dialogue
     started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     commands: asyncio.Queue[OfficerCommand] = field(default_factory=asyncio.Queue)
+    _segments: list[str] = field(default_factory=list)
+
+    def masked_segment(self, text: str) -> str:
+        """One transcript segment as the consoles see it. The caller's own browser gets it as
+        Prisma wrote it; these are their own words."""
+        self._segments = [*self._segments[1 - SEGMENTS_MASKED_TOGETHER :], text]
+        return mask_turns(self._segments, CONSOLE_PERSONAL_ID)[-1]
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -51,7 +65,7 @@ class LiveCall:
             "officer": self.dialogue.officer,
             "slots": asdict(self.dialogue.slots),
             # What the caller has said so far, for a console that joins mid-call.
-            "turns": list(self.dialogue.turns),
+            "turns": mask_turns(self.dialogue.turns, CONSOLE_PERSONAL_ID),
         }
 
 
@@ -101,7 +115,13 @@ class LiveCalls:
         self._broadcast({"type": "call_closed", "call_id": call_id})
 
     def publish(self, call_id: str, message: dict[str, Any]) -> None:
-        """Copy one message a caller's browser got to every console."""
+        """Copy one message a caller's browser got to every console. Agent lines go as they are:
+        they come from the templates or from an officer, never from what the caller said."""
+        call = self._calls.get(call_id)
+        if call is None:
+            return
+        if message.get("type") == "transcript":
+            message = {**message, "text": call.masked_segment(message["text"])}
         self._broadcast({"type": "call_event", "call_id": call_id, "event": message})
 
     @contextlib.contextmanager

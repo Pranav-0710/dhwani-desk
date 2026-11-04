@@ -44,6 +44,16 @@ def request(**overrides: object) -> TicketRequest:
         ("984.501.2345", 0.1, "XXX.XXX.XXXX"),
         ("98450 — 12345", 0.1, "XXXXX — XXXXX"),
         ("೯೮೪೫೦೧೨೩೪೫", 0.1, "XXXXXXXXXX"),
+        # The number said digit by digit in words, Kannada or English in Kannada script.
+        (
+            "ನನ್ನ ನಂಬರ್ ಒಂಬತ್ತು ಎಂಟು ನಾಲ್ಕು ಐದು ಸೊನ್ನೆ ಒಂದು ಎರಡು ಮೂರು ನಾಲ್ಕು ಐದು",
+            0.1,
+            "ನನ್ನ ನಂಬರ್ XXXXXXX XXXX XXXXXX XXX XXXXXX XXXX XXXX XXXX XXXXXX XXX",
+        ),
+        ("ನೈನ್ ಎಯ್ಟ್ ಫೋರ್ ಫೈವ್ 0 1 2 3 4 5", 0.1, "XXXX XXXXX XXXX XXXX X X X X X X"),
+        ("ಖಾತೆ ಫೋರ್ ಫೈವ್ ಟೂ ಒನ್", 0.9, "ಖಾತೆ XXXX XXXX XX XXX"),
+        # Number words in a sentence are not a number: three days, one week.
+        ("ಮೂರು ದಿನದಿಂದ ಒಂದು ವಾರ ಆರು ಗಂಟೆ", 0.9, "ಮೂರು ದಿನದಿಂದ ಒಂದು ವಾರ ಆರು ಗಂಟೆ"),
     ],
 )
 def test_personal_numbers_are_masked(text: str, personal_id: float, expected: str) -> None:
@@ -87,6 +97,43 @@ def test_transcripts_are_masked_and_deleted_after_the_retention_period(ticket_st
     ticket_store.file(request())
     assert ticket_store.purge_transcripts(7, at=eight_days_on) == 0
     assert len(ticket_store.tickets()) == 1  # tickets are kept
+
+
+def test_a_tickets_location_is_blanked_after_its_retention_and_the_ticket_stays(
+    ticket_store: TicketStore,
+) -> None:
+    ticket_store.file(request())
+    words = ticket_store.tickets()[0]["location_text"]
+    assert words
+
+    assert ticket_store.purge_ticket_locations(30) == 0  # nothing is old yet
+    assert ticket_store.tickets()[0]["location_text"] == words
+
+    later = datetime.now(UTC) + timedelta(days=31)
+    assert ticket_store.purge_ticket_locations(30, at=later) == 1
+    (ticket,) = ticket_store.tickets()
+    assert ticket["location_text"] == ""
+    assert ticket["department"] and ticket["decision"]  # what the field team needs stays
+
+    assert ticket_store.purge_ticket_locations(30, at=later) == 0  # blanked once
+
+
+def test_the_retention_sweep_blanks_old_ticket_locations(ticket_store, monkeypatch) -> None:
+    ticket_store.file(request())
+    settings = isolated_settings(ticket_location_retention_days=30)
+    monkeypatch.setattr(app_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        ticket_store,
+        "purge_ticket_locations",
+        lambda days: TicketStore.purge_ticket_locations(
+            ticket_store, days, at=datetime.now(UTC) + timedelta(days=days + 1)
+        ),
+    )
+
+    with TestClient(app_module.app):
+        pass
+
+    assert ticket_store.tickets()[0]["location_text"] == ""
 
 
 CONSOLE = {"Authorization": "Bearer console-test-token-0123"}
@@ -227,3 +274,16 @@ def test_the_bearer_scheme_is_case_insensitive(ticket_store, console_token) -> N
     headers = {"Authorization": "bearer  console-test-token-0123 "}
     with TestClient(app_module.app, headers=headers) as client:
         assert client.get("/api/thresholds").status_code == 200
+
+
+def test_a_corrected_ward_is_filed_with_the_words_that_corrected_it() -> None:
+    ward_only = dataclasses.replace(NOTHING, ward="w05", has_location=0.9)
+    desk = CountingDesk()
+    call = Dialogue(load_templates(), ScriptedDecider(ward_only, ROADS_IN_W04), desk)
+
+    call.turn("ಕೆರೆಕೋಡಿ ಬಸ್ ಸ್ಟ್ಯಾಂಡ್ ಹತ್ತಿರ")
+    call.turn("ಕ್ಷಮಿಸಿ, ಗಾಂಧಿನಗರ, ರೋಡ್ ಹಾಳಾಗಿದೆ")
+
+    (filed,) = desk.filed
+    assert filed.ward == "w04"
+    assert filed.location_text == "ಕೆರೆಕೋಡಿ ಬಸ್ ಸ್ಟ್ಯಾಂಡ್ ಹತ್ತಿರ ಕ್ಷಮಿಸಿ, ಗಾಂಧಿನಗರ, ರೋಡ್ ಹಾಳಾಗಿದೆ"

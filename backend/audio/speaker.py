@@ -13,6 +13,8 @@ logger = logging.getLogger("dhwani.speaker")
 
 # Longest an agent line may take from request to last chunk before it is abandoned.
 UTTERANCE_DEADLINE_S = 20.0
+# What the browser is told when a line cannot be spoken; the reason is only logged.
+TTS_FAILED = "The agent's voice is unavailable for this line"
 
 
 class SpeechStream(Protocol):
@@ -28,7 +30,8 @@ class Speaker:
     call carries on with the next line. A line cut by `interrupt` ends with `agent_audio_end`
     marked `interrupted`. Lines still queued when the call ends are dropped.
 
-    The queue is unbounded; the dialogue queues one reply (a few lines) per caller turn.
+    The queue is unbounded; the dialogue queues one reply (a few lines) per caller turn, and the
+    call route checks `queued` before queueing an officer's line.
     """
 
     def __init__(self, tts: SpeechStream, outbox: Outbox, sample_rate: int) -> None:
@@ -45,6 +48,11 @@ class Speaker:
 
     def say(self, text: str) -> None:
         self._lines.put_nowait(text)
+
+    @property
+    def queued(self) -> int:
+        """Lines waiting behind the one being spoken."""
+        return self._lines.qsize()
 
     def interrupt(self) -> None:
         """The caller spoke over the agent (barge-in): stop the line being sent and drop the
@@ -101,10 +109,11 @@ class Speaker:
             raise
         except (TimbreError, TimeoutError) as exc:
             logger.warning("TTS failed: %s", exc)
-            await self._outbox.json({"type": "tts_error", "message": str(exc) or "timed out"})
-        except Exception as exc:
+            # The detail (Timbre's own error text) stays in the log above.
+            await self._outbox.json({"type": "tts_error", "message": TTS_FAILED})
+        except Exception:
             logger.exception("Unexpected TTS failure")
-            await self._outbox.json({"type": "tts_error", "message": type(exc).__name__})
+            await self._outbox.json({"type": "tts_error", "message": TTS_FAILED})
         await self._outbox.json({"type": "agent_audio_end"})
 
     def _played(self, pcm: bytes) -> None:

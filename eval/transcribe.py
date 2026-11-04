@@ -91,6 +91,8 @@ def conditions(path: Path, wanted: list[str]) -> dict[str, tuple[bytes, int]]:
 
 
 async def run(only: str | None) -> None:
+    from gnani.prisma import PrismaError
+
     clips = sorted(AUDIO.glob("*.wav"))
     if not clips:
         raise SystemExit(f"No recordings in {AUDIO}; run record.py first")
@@ -110,7 +112,9 @@ async def run(only: str | None) -> None:
         for condition, (pcm, rate) in conditions(clip, todo).items():
             try:
                 row[condition] = await transcribe(pcm, rate)
-            except NoTranscript as error:
+            except (NoTranscript, PrismaError) as error:
+                # A dropped or refused Prisma session fails this clip only; the next run
+                # retries it.
                 failed += 1
                 print(f"[{number}/{len(clips)}] {clip.stem} {condition}: FAILED, {error}")
                 continue
