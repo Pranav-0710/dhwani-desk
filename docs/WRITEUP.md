@@ -86,7 +86,7 @@ On the noisy 8 kHz line, v2 caught 26 of 34 hazards against v1's 29. The fix for
 
 ## What we would do next
 
-- Train on better Kannada: have native speakers write or fix the training sentences. Generating more data did not fix this: in our hand check, by a non-native reader, only 35% of the second set's sentences read as natural. The officer-request gain in `kn-ft-v2` is worth keeping, so the next run should add those rows without losing hazard recall.
+- Train on better Kannada: have native speakers write or fix the training sentences. Generating a new set did not fix this: in our hand check, by a non-native reader, only 35% of the second set's sentences read as natural. The officer-request gain in `kn-ft-v2` is worth keeping, so the next run should add those rows without losing hazard recall.
 - Make the safety step faster (int8, once it keeps the fine-tuned model's answers), so the answer follows the acknowledgement sooner.
 - Test with real voices reading the test set, and on a real phone line (LiveKit).
 
