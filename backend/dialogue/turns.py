@@ -2,6 +2,8 @@
 
 import asyncio
 
+from cancelling import cancel_and_wait
+
 # Prisma ends a segment at a short pause, so one sentence can arrive in two or three pieces.
 # A turn ends when no new segment arrives for this long; every extra 100 ms here is 100 ms
 # before the agent answers, so #22 tunes it against real calls.
@@ -31,8 +33,7 @@ class TurnCollector:
 
     async def aclose(self) -> None:
         if self._timer:
-            self._timer.cancel()
-            await asyncio.gather(self._timer, return_exceptions=True)
+            await cancel_and_wait(self._timer)
 
     async def _finish_after_pause(self) -> None:
         await asyncio.sleep(self.pause_s)

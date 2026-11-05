@@ -7,6 +7,7 @@ from typing import Protocol
 from starlette.websockets import WebSocketDisconnect
 
 from audio.outbox import Outbox
+from cancelling import cancel_and_wait
 from gnani.timbre import TimbreError
 
 logger = logging.getLogger("dhwani.speaker")
@@ -72,8 +73,7 @@ class Speaker:
         await asyncio.sleep(max(0.0, self._heard_by - loop.time()))
 
     async def aclose(self) -> None:
-        self._worker.cancel()
-        await asyncio.gather(self._worker, return_exceptions=True)
+        await cancel_and_wait(self._worker)
 
     async def _run(self) -> None:
         while True:
