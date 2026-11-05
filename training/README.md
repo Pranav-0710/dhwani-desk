@@ -69,3 +69,9 @@ Before training, `--push-tag` checks that the token reaches the model repo and t
 Known gap: the backend asks Laya about everything the caller has said so far, and training uses single sentences. A two-turn call (problem, then the place) is outside what the model has seen; the eval harness measures how much that costs.
 
 `.env.example` runs `kn-ft-v1` (`DECIDER=laya`, `LAYA_CHECKPOINT_REVISION=kn-ft-v1`); a new tag goes there once the eval harness has scored it. Zero-shot against fine-tuned on the held-out test set is measured by the eval harness (`eval/`, #19), not here: Laya's own before/after uses its calibration slice, which comes from the training data.
+
+## Second fine-tune (#67)
+
+`kn-ft-v2` was trained on the dataset tag `v2.0`. `clean_v2.py` builds that set from the generator's 2,837 rows, using the hand-check verdicts in `results/v2-hand-check.json` (row ids only). Its output matches the files on the Hub apart from line endings: the Hub copies have Windows line endings, which JSON readers ignore.
+
+The checkpoint did not replace `kn-ft-v1`: it caught more officer requests but missed more hazards, so the rule in `eval/compare.py` kept `kn-ft-v1` (`eval/reports/switch-kn-ft-v2.md`). `.env.example` still pins `kn-ft-v1`.
