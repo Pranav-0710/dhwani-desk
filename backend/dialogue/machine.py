@@ -310,11 +310,12 @@ class Dialogue:
         # best one; slots are only ever filled, never emptied.
         if decision.department_confidence >= DEPARTMENT_CONFIDENCE:
             self.slots.department = decision.department
-        # A turn that first gives the location, or first names the ward, is kept verbatim.
+        # A turn that first gives the location, or names a ward (the first or a corrected one),
+        # is kept verbatim: it is what the field team reads.
         new_place = not self.slots.location_given and (
             decision.ward != "unknown" or decision.has_location > HAS_LOCATION
         )
-        new_ward = self.slots.ward is None and decision.ward != "unknown"
+        new_ward = decision.ward not in ("unknown", self.slots.ward)
         if (new_place or new_ward) and self.turns:
             self.location_turns.append(self.turns[-1])
         if decision.ward != "unknown":

@@ -9,8 +9,8 @@ training
 docs
 .git
 .github
-.env
-.env.*
+**/.env
+**/.env.*
 **/*.db
 **/*.db-wal
 **/*.db-shm

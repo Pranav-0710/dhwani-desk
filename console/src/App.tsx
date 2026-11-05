@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { NOISE_LEVELS, type NoiseLevel } from './audio/noise'
 import { CallClient, type CallEvent, type CallStatus } from './call/call-client'
+import { callErrorText } from './call/error-text'
 
 const NOISE_LABEL: Record<NoiseLevel, string> = {
   off: 'Off',
@@ -10,12 +11,13 @@ const NOISE_LABEL: Record<NoiseLevel, string> = {
 
 type Line = { id: number; who: 'caller' | 'agent'; text: string; latencyMs?: number | null }
 
-const STATUS_LABEL: Record<CallStatus, string> = {
-  idle: 'Ready to call',
-  connecting: 'Connecting…',
-  listening: 'Listening — speak in Kannada',
-  'agent-speaking': 'Agent is speaking',
-  ended: 'Call ended',
+/** Kannada first, for the caller; English under it. */
+const STATUS_LABEL: Record<CallStatus, { kn: string; en: string }> = {
+  idle: { kn: 'ಕರೆ ಮಾಡಲು ಸಿದ್ಧ', en: 'Ready to call' },
+  connecting: { kn: 'ಸಂಪರ್ಕಿಸಲಾಗುತ್ತಿದೆ…', en: 'Connecting…' },
+  listening: { kn: 'ಕನ್ನಡದಲ್ಲಿ ಮಾತನಾಡಿ', en: 'Listening — speak in Kannada' },
+  'agent-speaking': { kn: 'ಸಹಾಯವಾಣಿ ಮಾತನಾಡುತ್ತಿದೆ', en: 'Agent is speaking' },
+  ended: { kn: 'ಕರೆ ಮುಗಿದಿದೆ', en: 'Call ended' },
 }
 
 export default function App() {
@@ -25,10 +27,15 @@ export default function App() {
   const [noise, setNoise] = useState<NoiseLevel>('off')
   const client = useRef<CallClient | null>(null)
   const nextId = useRef(0)
+  const transcript = useRef<HTMLOListElement>(null)
 
   const inCall = status === 'connecting' || status === 'listening' || status === 'agent-speaking'
 
   useEffect(() => () => void client.current?.hangUp(), [])
+
+  useEffect(() => {
+    transcript.current?.scrollTo({ top: transcript.current.scrollHeight })
+  }, [lines.length])
 
   function onEvent(event: CallEvent) {
     switch (event.type) {
@@ -75,21 +82,48 @@ export default function App() {
   return (
     <main className="phone">
       <header>
-        <h1>Nagara Seva helpline</h1>
-        <p className="subtitle">City Corporation of Hosapura · demo line</p>
+        <h1 lang="kn">ನಗರ ಸೇವಾ ಸಹಾಯವಾಣಿ</h1>
+        <p className="subtitle">
+          Nagara Seva helpline
+          <br />
+          City Corporation of Hosapura · demo line
+        </p>
       </header>
 
-      <section className={`status status-${status}`} aria-live="polite">
-        {STATUS_LABEL[status]}
-      </section>
+      <div className={`status status-${status}`} role="status">
+        <span className="status-mark" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </span>
+        <span>
+          <span className="status-main" lang="kn">
+            {STATUS_LABEL[status].kn}
+          </span>
+          <span className="status-sub">{STATUS_LABEL[status].en}</span>
+        </span>
+      </div>
 
       {error && (
         <p className="error" role="alert">
-          {error}
+          {callErrorText(error)}
         </p>
       )}
 
-      <ol className="transcript" aria-label="Conversation">
+      {lines.length === 0 && (
+        <p className="hint">
+          {!inCall && !error && (
+            <>
+              <span className="hint-main" lang="kn">
+                ಕರೆ ಮಾಡಿ, ಕನ್ನಡದಲ್ಲಿ ನಿಮ್ಮ ದೂರು ಹೇಳಿ.
+              </span>
+              Press Call, then say your complaint in Kannada.
+            </>
+          )}
+        </p>
+      )}
+
+      <ol className="transcript" ref={transcript} aria-label="Conversation">
         {lines.map((line) => (
           <li key={line.id} className={line.who}>
             <span className="who">{line.who === 'caller' ? 'You' : 'Agent'}</span>
@@ -122,7 +156,9 @@ export default function App() {
         className={inCall ? 'hang-up' : 'call'}
         onClick={inCall ? hangUp : startCall}
       >
-        {inCall ? 'Hang up' : 'Call'}
+        <span lang="kn">{inCall ? 'ಕರೆ ಮುಗಿಸಿ' : status === 'ended' ? 'ಮತ್ತೆ ಕರೆ ಮಾಡಿ' : 'ಕರೆ ಮಾಡಿ'}</span>
+        {' · '}
+        {inCall ? 'Hang up' : status === 'ended' ? 'Call again' : 'Call'}
       </button>
     </main>
   )

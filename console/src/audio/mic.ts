@@ -3,10 +3,16 @@ import { Downsampler, floatToInt16 } from './pcm'
 
 /** Send to the backend in ~40 ms batches rather than one tiny frame per 128-sample block. */
 const BATCH_SECONDS = 0.04
+/** How much of the caller's own sound is kept while muted, for a barge-in to send. Barge-in
+ * needs 160 ms of loud speech before it opens the mic, so without this the start is lost. */
+const RECENT_BATCHES = Math.round(0.3 / BATCH_SECONDS)
 
 export interface Mic {
   /** Background line noise mixed into what is sent from now on (`noise.ts`). */
   setNoise: (level: NoiseLevel) => void
+  /** The caller's own sound from the last ~300 ms of muted batches, oldest first; emptied
+   * by the call. Sent on a barge-in, so the first syllables are not lost. */
+  takeRecent?: () => Int16Array<ArrayBuffer>[]
   stop: () => Promise<void>
 }
 
@@ -60,13 +66,17 @@ export const startMic: StartMic = async (targetRate, onPcm, muted, onLevel) => {
     const noise = new NoiseMixer()
     const batchSize = Math.round(targetRate * BATCH_SECONDS)
     let pending: number[] = []
+    let recent: Int16Array<ArrayBuffer>[] = []
 
     capture.port.onmessage = (event: MessageEvent<Float32Array>) => {
       pending.push(...downsampler.process(event.data))
       if (pending.length >= batchSize) {
         const batch = Float32Array.from(pending)
         onLevel?.(rmsOf(batch))
-        onPcm(lineBatch(batch, muted(), noise))
+        const isMuted = muted()
+        onPcm(lineBatch(batch, isMuted, noise))
+        if (isMuted) recent = [...recent, floatToInt16(batch)].slice(-RECENT_BATCHES)
+        else recent = []
         pending = []
       }
     }
@@ -75,6 +85,11 @@ export const startMic: StartMic = async (targetRate, onPcm, muted, onLevel) => {
     return {
       setNoise: (level) => {
         noise.level = level
+      },
+      takeRecent: () => {
+        const taken = recent
+        recent = []
+        return taken
       },
       stop: async () => {
         capture.port.onmessage = null

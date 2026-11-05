@@ -35,11 +35,11 @@ lines:
   # I have marked this as a problem you reported before; we will give it priority.
   repeat_noted: "ಇದು ಮೊದಲೇ ದೂರು ಕೊಟ್ಟ ಸಮಸ್ಯೆ ಅಂತ ಗುರುತು ಮಾಡಿದ್ದೇನೆ, ಇದಕ್ಕೆ ಆದ್ಯತೆ ಕೊಡ್ತೀವಿ."
 
-  # Okay, your {department} complaint in {ward} ward is registered. Your ticket number is {ticket}.
-  read_back_ward: "ಸರಿ, {ward} ವಾರ್ಡ್‌ನ ನಿಮ್ಮ {department} ದೂರು ದಾಖಲಾಗಿದೆ. ನಿಮ್ಮ ಟಿಕೆಟ್ ಸಂಖ್ಯೆ {ticket}."
+  # Your {department} complaint in {ward} ward is registered. Your ticket number is {ticket}.
+  read_back_ward: "{ward} ವಾರ್ಡ್‌ನ ನಿಮ್ಮ {department} ದೂರು ದಾಖಲಾಗಿದೆ. ನಿಮ್ಮ ಟಿಕೆಟ್ ಸಂಖ್ಯೆ {ticket}."
 
-  # Okay, your {department} complaint is registered. Your ticket number is {ticket}.
-  read_back: "ಸರಿ, ನಿಮ್ಮ {department} ದೂರು ದಾಖಲಾಗಿದೆ. ನಿಮ್ಮ ಟಿಕೆಟ್ ಸಂಖ್ಯೆ {ticket}."
+  # Your {department} complaint is registered. Your ticket number is {ticket}.
+  read_back: "ನಿಮ್ಮ {department} ದೂರು ದಾಖಲಾಗಿದೆ. ನಿಮ್ಮ ಟಿಕೆಟ್ ಸಂಖ್ಯೆ {ticket}."
 
   # Our team will look into it. Thank you for calling.
   closing: "ನಮ್ಮ ತಂಡ ಇದನ್ನು ನೋಡಿಕೊಳ್ಳುತ್ತದೆ. ಕರೆ ಮಾಡಿದ್ದಕ್ಕೆ ಧನ್ಯವಾದ."

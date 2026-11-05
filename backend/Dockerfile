@@ -1,9 +1,10 @@
 # The backend: FastAPI on port 8000. Build from the repo root (it needs data/ too):
 #   docker build -f backend/Dockerfile .
 # LAYA=1 adds the Laya runtime, for DECIDER=laya.
-FROM python:3.11-slim
+# Base images pinned by digest (the tag kept for reading): a re-pushed tag cannot change a build.
+FROM python:3.11-slim@sha256:673719e071ecf27434fd2635bbd8d00f49f4fdd81f243143438a42ced8bedf60
 
-COPY --from=ghcr.io/astral-sh/uv:0.9.5 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.9.5@sha256:f459f6f73a8c4ef5d69f4e6fbbdb8af751d6fa40ec34b39a1ab469acd6e289b7 /uv /usr/local/bin/uv
 ENV UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1 PYTHONUNBUFFERED=1
 
 WORKDIR /app/backend
@@ -28,4 +29,5 @@ EXPOSE 8000
 # A first start with DECIDER=laya downloads the checkpoint (about 1.3 GB) before /health answers.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=600s --retries=3 \
     CMD ["/app/backend/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
-CMD ["/app/backend/.venv/bin/uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+# uvicorn would otherwise take a 16 MiB frame from anyone, before any check of ours has run.
+CMD ["sh", "-c", "exec /app/backend/.venv/bin/uvicorn app:app --host 0.0.0.0 --port 8000 --ws-max-size \"${WS_MAX_FRAME_BYTES:-65536}\""]

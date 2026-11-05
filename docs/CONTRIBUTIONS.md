@@ -11,7 +11,7 @@ From 2026-10-28 Lakshmi Narasimman is away again, and Jey Pranav is doing the re
 | Gnani integration | Prisma realtime STT client and proxy; Timbre TTS client and voice choice; browser call path | |
 | Dialogue and escalation | Dialogue state machine, Kannada reply templates, escalation order; officer take-over and hand-back; barge-in | |
 | Laya (benchmark, fine-tuning, serving) | Week-1 Kannada benchmark and go/no-go decision; ONNX serving in the call, safety-first decisions, latency report; fine-tuning run and checkpoint publishing | |
-| Data and evaluation | Decision schema, fictional wards, seed set; synthetic data generator with consistency and meaning checks; eval harness and seed-set comparison | |
+| Data and evaluation | Decision schema, fictional wards, seed set; synthetic data generator with consistency and meaning checks; eval harness and seed-set comparison | Generator changes for the second fine-tune (#67): fewer hazard scenarios, more officer requests |
 | Console and phone UI | Phone page: browser mic capture and agent playback; line noise toggle; supervisor console | |
 | Delivery (Docker, demo, posts, write-up) | Repo bootstrap, CI, PRD; Hugging Face organization and repos; call sockets locked down for the tunnel; Docker Compose and tunnel runbook; demo video, posts and write-up | |
 | Review and testing | | Reviewed and approved #39; tested the app |
@@ -51,3 +51,11 @@ From 2026-10-28 Lakshmi Narasimman is away again, and Jey Pranav is doing the re
 | 2026-11-01 | Jey Pranav | #62 | Reconnect follow-up: one microphone per call, retry only recoverable Prisma failures, not after hang-up (#61) |
 | 2026-11-01 | Jey Pranav | #64 | Demo hardening: SQLite side files ignored, port 8080 on localhost only, console token at least 20 characters, rate limits on the token routes (#63) |
 | 2026-11-01 | Jey Pranav | #66 | A failed turn hands the call to an officer instead of going silent; barge-in no longer cuts the ticket number or safety advice (#65) |
+| 2026-11-01 | Jey Pranav | #69 | Review fixes: one call per caller and a 10-minute cap, ticket filing off the event loop, corrected wards kept, generic error text, digit-word numbers masked (#68) |
+| 2026-11-01 | Jey Pranav | #71 | Low-priority review fixes: strict CSP, barge-in keeps the first syllables and survives a race, eval survives a Prisma error, CI actions and base images pinned (#70) |
+| 2026-11-02 | Jey Pranav | #73 | Clearer phone page and console: safety calls first, one-screen phone with the newest line in view, Kannada-first status, keyboard take-over, contrast, readable at 100% and 50% zoom (#72) |
+| 2026-11-02 | Jey Pranav | #75 | Read-back lines no longer repeat the "okay" said just before them (#74) |
+| 2026-11-02 | Jey Pranav | #77 | Threat model and fixes: credit ceiling, /ws/stt off, console sockets capped and origin-checked, masked numbers on consoles, ticket locations blanked after 30 days, flush backlog fixed (#76) |
+| 2026-11-04 | Lakshmi Narasimman | #78 | Second fine-tune (#67): non-hazard drainage and road scenarios (hazards now 4 of 12 and 3 of 10), officer requests raised to 20% of rows and repeat complaints to 25%, varied officer-request wording in the generation prompt; notebooks 02 and 03 set up for the `v2.0` data tag and the `kn-ft-v2` checkpoint |
+| 2026-11-05 | Jey Pranav | #81 | Rule for replacing the live checkpoint, committed before `kn-ft-v2` was scored: any fall in safety recall or a mere tie keeps `kn-ft-v1` (#79) |
+| 2026-11-05 | Jey Pranav | #82 | Flaky console test fixed: a cancel arriving during teardown no longer escapes the test client, with one helper for every cancel-then-wait (#80) |

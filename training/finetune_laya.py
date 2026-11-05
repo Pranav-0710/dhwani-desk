@@ -154,7 +154,7 @@ def pinned_dataset(revision: str, create: bool) -> str:
         tag=revision,
         revision=head,
         repo_type="dataset",
-        tag_message="Training set of the first fine-tune (#12, #14)",
+        tag_message="Training set pinned by finetune_laya.py (#12, #14, #67)",
     )
     print(f"Tagged {DATASET_REPO}@{head[:10]} as {revision}", flush=True)
     return head

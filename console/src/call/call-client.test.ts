@@ -74,6 +74,8 @@ function setup() {
     stopped: false,
     noise: [] as NoiseLevel[],
     setNoise: (level: NoiseLevel) => void mic.noise.push(level),
+    recent: [] as Int16Array<ArrayBuffer>[],
+    takeRecent: () => mic.recent.splice(0),
     stop: async () => void (mic.stopped = true),
   }
 
@@ -132,6 +134,30 @@ describe('CallClient', () => {
     await call.grantMic()
 
     expect(call.statuses()).toEqual(['connecting', 'listening'])
+  })
+
+  it('does not say listening when the mic opens during the greeting', async () => {
+    const call = setup()
+    call.socket.serverSends({ type: 'connected' })
+    call.socket.serverSends({ type: 'agent_audio_start', sample_rate: 16000 })
+    await call.grantMic()
+
+    expect(call.statuses().at(-1)).toBe('agent-speaking')
+  })
+
+  it('does not say listening when the mic opens while a sent greeting still plays', async () => {
+    const call = setup()
+    call.socket.serverSends({ type: 'connected' })
+    call.socket.serverSends({ type: 'agent_audio_start', sample_rate: 16000 })
+    call.player.queued = 4 // a cached line arrives far faster than it plays
+    call.socket.serverSends({ type: 'agent_audio_end' })
+    await call.grantMic()
+
+    expect(call.statuses().at(-1)).toBe('agent-speaking')
+
+    call.player.queued = 0
+    call.advance(4300)
+    expect(call.statuses().at(-1)).toBe('listening')
   })
 
   it('keeps one mic when the server reconnects to Prisma mid-call', async () => {
@@ -217,9 +243,9 @@ describe('CallClient', () => {
     expect(call.mic.noise).toEqual(['heavy', 'off'])
   })
 
-  it('does not print empty brackets when Prisma closes without a reason', () => {
+  it('says the speech service ended the call when Prisma closes it', () => {
     const call = setup()
-    call.socket.serverSends({ type: 'closed', reason: '' })
+    call.socket.serverSends({ type: 'closed' })
 
     expect(call.events.at(-1)).toEqual({ type: 'error', message: 'Speech service ended the call' })
   })
@@ -258,6 +284,29 @@ describe('CallClient', () => {
         expect(call.player.stops).toBe(0)
         expect(call.socket.texts).toEqual([])
       }
+    })
+
+    it('sends what the caller said while muted, so their first syllables are not lost', async () => {
+      const call = await agentSpeaking()
+      call.mic.recent.push(Int16Array.from([8, 9]))
+      for (let i = 0; i < Math.ceil(BARGE_IN_MS / 40) + 1; i++) call.level(BARGE_IN_RMS * 2)
+
+      expect(call.socket.texts).toEqual(['barge_in'])
+      expect(Array.from(new Int16Array(call.socket.sent.at(-1)!))).toEqual([8, 9])
+    })
+
+    it('cuts a line that started after the barge-in, without muting the caller', async () => {
+      const call = await agentSpeaking()
+      for (let i = 0; i < 6; i++) call.level(1)
+      // The server sent the next line before it read the barge-in, then cut it.
+      call.socket.serverSends({ type: 'agent_audio_start', sample_rate: 16000 })
+      call.socket.serverSendsAudio()
+      call.socket.serverSends({ type: 'agent_audio_end', interrupted: true })
+      call.speak([4])
+
+      expect(call.player.stops).toBe(2)
+      expect(call.statuses().at(-1)).toBe('listening')
+      expect(Array.from(new Int16Array(call.socket.sent.at(-1)!))).toEqual([4])
     })
 
     it("drops the cut line's late audio and does not mute the caller for its tail", async () => {

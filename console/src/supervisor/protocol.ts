@@ -236,12 +236,29 @@ export function needsOfficer(call: LiveCall): boolean {
   return !call.ended && call.state === 'handed_off' && !call.officer
 }
 
-/** Calls waiting for an officer, the longest-waiting first. */
+/** The call was handed off for danger or an emergency (machine.py gives both this reason). */
+export function isSafety(call: LiveCall): boolean {
+  return call.reason === 'safety'
+}
+
+/** Calls waiting for an officer: safety risks first, then the longest-waiting first. */
 export function waitingCalls(state: ConsoleState): LiveCall[] {
   return state.order
     .map((id) => state.calls[id])
     .filter(needsOfficer)
     .reverse()
+    .sort((a, b) => Number(isSafety(b)) - Number(isSafety(a)))
+}
+
+/** The call list, most pressing first: waiting for an officer, with an officer, with the agent
+ * (each newest first), and ended calls last. */
+export function callsByUrgency(state: ConsoleState): LiveCall[] {
+  const rank = (call: LiveCall) => (call.ended ? 2 : call.officer ? 0 : 1)
+  const others = state.order
+    .map((id) => state.calls[id])
+    .filter((call) => !needsOfficer(call))
+    .sort((a, b) => rank(a) - rank(b))
+  return [...waitingCalls(state), ...others]
 }
 
 /** Which call the page shows: the officer's choice, else the longest-waiting, else the newest.
