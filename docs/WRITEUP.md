@@ -27,7 +27,7 @@ Civic helplines in Kannada-speaking cities are built around English menus, offic
 | Text to speech | Gnani **Timbre v2.5**, `kn-IN`, voice Saanvi, streamed | Gnani API |
 | Decisions | **Laya** 0.4.6 multilingual decision engine (`convaiinnovations/laya-multilingual`), fine-tuned on synthetic Kannada complaints, exported to ONNX | Laptop CPU (ONNX Runtime) |
 | Training data | **Qwen3-14B** (4-bit) writes the synthetic caller sentences and checks their meaning | Kaggle, 2×T4 |
-| Fine-tuning | Laya's own fine-tuning code, 3 epochs | Kaggle, 2×T4 |
+| Fine-tuning | Laya's own fine-tuning code, 2 epochs for the live checkpoint | Kaggle, 2×T4 |
 
 The fine-tuned checkpoint and the datasets are in private Hugging Face repos (`Dhwanidesk/dhwani-desk-laya` at tag `kn-ft-v1`, `Dhwanidesk/dhwani-desk-data`). The backend pins the tag, and every ticket stores the checkpoint revision that decided it.
 
@@ -69,11 +69,24 @@ Held-out test set, spoken, Prisma at 16 kHz ([`eval/reports/test-kn-ft-v1-timbre
 - Phone-line audio costs almost nothing: the 8 kHz noisy line drops macro-F1 by about 0.01.
 - The test audio is synthetic speech, so these numbers measure the line and Prisma, not real callers' voices.
 
+**A second fine-tune did not replace the first.** To fix the two weakest results, we generated new data with more callers asking for a person and more everyday drain and road complaints, then filtered it after a hand check. We wrote the rule for switching checkpoints before scoring: no fall in safety recall, and a real gain somewhere ([`eval/compare.py`](../eval/compare.py)). `kn-ft-v2` met the gain but broke the safety rule ([`eval/reports/switch-kn-ft-v2.md`](../eval/reports/switch-kn-ft-v2.md)), so `kn-ft-v1` stays live.
+
+| Spoken, 16 kHz | `kn-ft-v1` (live) | `kn-ft-v2` |
+| --- | --- | --- |
+| Wants a human, recall | 3 of 7 | **5 of 7** |
+| Urgency accuracy | 0.49 | **0.57** |
+| Department macro-F1 | 0.71 | 0.72 |
+| Safety hazard recall | **30 of 34** | 28 of 34 |
+| Safety hazard precision | **0.58** | 0.54 |
+| Caller state accuracy | **0.72** | 0.65 |
+
+On the noisy 8 kHz line, v2 caught 26 of 34 hazards against v1's 29. The fix for false hazards did not work, and it cost real ones. The test set is small, so a sentence or two can move these scores, but a missed emergency is the error we least accept. We did not tune v2 further against this test set, because that would stop it being a fair test.
+
 **Latency** ([`docs/decisions/laya-latency.md`](decisions/laya-latency.md)): the agent says "ಸರಿ" ("okay") as soon as the caller finishes, about 1.5 s after their last word (the target is 1.5 s). The answer itself follows 3.7 to 6 s after the caller stopped on a busy laptop, about 2.8 s on a quieter run: Prisma's transcript (about 0.75 s), a 0.6 s pause to let the caller finish, Laya (1 to 4 s depending on load, mostly the safety step) and Timbre (about 0.3 s). On the first turn of a call, Prisma's first transcript sometimes took about 12 s.
 
 ## What we would do next
 
-- Train on better Kannada: have native speakers write or fix the training sentences, and add examples of callers asking for a person and of everyday drain and road complaints that are not dangerous.
+- Train on better Kannada: have native speakers write or fix the training sentences. Generating more data did not fix this: in our hand check, by a non-native reader, only 35% of the second set's sentences read as natural. The officer-request gain in `kn-ft-v2` is worth keeping, so the next run should add those rows without losing hazard recall.
 - Make the safety step faster (int8, once it keeps the fine-tuned model's answers), so the answer follows the acknowledgement sooner.
 - Test with real voices reading the test set, and on a real phone line (LiveKit).
 
