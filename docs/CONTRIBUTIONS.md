@@ -56,3 +56,4 @@ From 2026-10-28 Lakshmi Narasimman is away again, and Jey Pranav is doing the re
 | 2026-11-02 | Jey Pranav | #75 | Read-back lines no longer repeat the "okay" said just before them (#74) |
 | 2026-11-02 | Jey Pranav | #77 | Threat model and fixes: credit ceiling, /ws/stt off, console sockets capped and origin-checked, masked numbers on consoles, ticket locations blanked after 30 days, flush backlog fixed (#76) |
 | 2026-11-05 | Jey Pranav | #81 | Rule for replacing the live checkpoint, committed before `kn-ft-v2` was scored: any fall in safety recall or a mere tie keeps `kn-ft-v1` (#79) |
+| 2026-11-05 | Jey Pranav | #82 | Flaky console test fixed: a cancel arriving during teardown no longer escapes the test client, with one helper for every cancel-then-wait (#80) |

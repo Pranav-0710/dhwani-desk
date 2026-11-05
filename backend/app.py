@@ -24,6 +24,7 @@ from fastapi import (
 from audio.outbox import Outbox
 from audio.speaker import Speaker
 from audio.tts_cache import AudioCache, CachedSpeech
+from cancelling import cancel_and_wait
 from config import Settings, get_settings
 from decisions import thresholds
 from dialogue.decision import Decider, Decision, Screening
@@ -102,8 +103,7 @@ async def lifespan(_: FastAPI):
     try:
         yield
     finally:
-        sweeper.cancel()
-        await asyncio.gather(sweeper, return_exceptions=True)
+        await cancel_and_wait(sweeper)
 
 
 app = FastAPI(title="Dhwani Desk", version="0.1.0", lifespan=lifespan)
@@ -408,9 +408,7 @@ async def _serve_console(websocket: WebSocket) -> None:
         try:
             await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         finally:
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+            await cancel_and_wait(*tasks)
     with contextlib.suppress(RuntimeError, WebSocketDisconnect):
         await websocket.close(code=1000)
 
@@ -755,9 +753,7 @@ async def _converse(
                 logger.warning("Prisma ended the session mid-call; reconnecting (%d)", attempt + 1)
                 await asyncio.sleep(STT_RECONNECT_DELAY_S)
         finally:
-            for task in background:
-                task.cancel()
-            await asyncio.gather(*background, return_exceptions=True)
+            await cancel_and_wait(*background)
             while not work.empty():
                 if isinstance(item := work.get_nowait(), OfficerCommand) and not item.done.done():
                     item.done.set_exception(LookupError("The call has ended"))
@@ -888,9 +884,7 @@ async def _relay(
             return "quiet" if went_quiet else "browser"
         return "prisma" if events in done else "agent"
     finally:
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await cancel_and_wait(*tasks)
 
 
 def _page_allowed(websocket: WebSocket, settings: Settings) -> bool:
