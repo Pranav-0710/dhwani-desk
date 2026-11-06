@@ -122,6 +122,7 @@ def create_stt_stream(settings: Settings) -> PrismaStream:
             output_format=settings.gnani_stt_format,
             bias_words=load_bias_words(settings.gnani_stt_bias_file),
             bias_score=settings.gnani_stt_bias_score,
+            model=settings.gnani_stt_model,
         )
     )
 

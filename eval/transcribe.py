@@ -7,24 +7,40 @@ the call does, twice: at 16 kHz as recorded, and at 8 kHz with the phone page's 
 was read (record.py). Runs again pick up where they stopped, and redo a sentence re-recorded since.
 A failed or empty transcript is not saved, so the next run tries it again.
 
-Usage, from backend/: uv run python ../eval/transcribe.py [--only 16k|8k]
-Costs Prisma credits: about 150 clips x 2 x their length.
+Harsher lines (#88), each 8 kHz: `ulaw` through a G.711 mu-law codec with heavy noise, `loss`
+with 3% of 20 ms packets lost and heavy noise, and `loud` with noise as loud as the speech.
+
+`--model prisma-v3.0` transcribes with Prisma v3.0 into `transcripts-prisma-v3.0.jsonl`, so the
+two models are scored on the same audio.
+
+Usage, from backend/: uv run python ../eval/transcribe.py [--only 16k|8k|ulaw|loss|loud]
+    [--model prisma-v3.0]
+Costs Prisma credits: about 150 clips x each condition x their length.
 """
 
 import argparse
 import asyncio
 import contextlib
 import json
+import random
 import sys
 from pathlib import Path
 
 from common import OUT, read_jsonl
-from line_audio import phone_line, read_wav, to_pcm16, write_wav
+from line_audio import drop_packets, mu_law, phone_line, read_wav, to_pcm16, write_wav
 
 AUDIO = OUT / "audio"
 TRANSCRIPTS = OUT / "transcripts.jsonl"
 CHUNK_S = 0.1
-NAMES = {"16k": "prisma_16k", "8k": "prisma_8k_noise"}
+NAMES = {
+    "16k": "prisma_16k",
+    "8k": "prisma_8k_noise",
+    "ulaw": "prisma_8k_ulaw_noise",
+    "loss": "prisma_8k_loss_noise",
+    "loud": "prisma_8k_loud_noise",
+}
+PACKET_LOSS = 0.03
+MODELS = ("prisma-v2.5", "prisma-v3.0")
 TRAILING_SILENCE_S = 1.5  # lets Prisma's VAD close the last segment
 WAIT_AFTER_S = 3.0
 
@@ -33,7 +49,12 @@ class NoTranscript(Exception):
     """Prisma reported an error or returned nothing."""
 
 
-async def transcribe(pcm: bytes, rate: int) -> str:
+def transcripts_file(model: str) -> Path:
+    """v2.5, the default, keeps the original file name."""
+    return TRANSCRIPTS if model == "prisma-v2.5" else OUT / f"transcripts-{model}.jsonl"
+
+
+async def transcribe(pcm: bytes, rate: int, model: str = "prisma-v2.5") -> str:
     """Prisma's transcript of `pcm`, streamed in real time; segments joined in order."""
     from config import get_settings
     from gnani.prisma import PrismaConfig, PrismaStream, load_bias_words
@@ -47,6 +68,7 @@ async def transcribe(pcm: bytes, rate: int) -> str:
         output_format=settings.gnani_stt_format,
         bias_words=load_bias_words(settings.gnani_stt_bias_file),
         bias_score=settings.gnani_stt_bias_score,
+        model="" if model == "prisma-v2.5" else model,
     )
     segments: list[str] = []
     errors: list[str] = []
@@ -87,16 +109,27 @@ def conditions(path: Path, wanted: list[str]) -> dict[str, tuple[bytes, int]]:
         line = phone_line(samples, rate, "heavy", seed=sum(map(ord, path.stem)))
         write_wav(OUT / "audio_8k_noise" / path.name, line, 8000)  # to listen to what Prisma got
         out["prisma_8k_noise"] = (to_pcm16(line), 8000)
+    seed = sum(map(ord, path.stem))
+    if "prisma_8k_ulaw_noise" in wanted:
+        coded = mu_law(phone_line(samples, rate, "heavy", seed))
+        out["prisma_8k_ulaw_noise"] = (to_pcm16(coded), 8000)
+    if "prisma_8k_loss_noise" in wanted:
+        line = phone_line(samples, rate, "heavy", seed)
+        lost = drop_packets(line, 8000, PACKET_LOSS, random.Random(seed))
+        out["prisma_8k_loss_noise"] = (to_pcm16(lost), 8000)
+    if "prisma_8k_loud_noise" in wanted:
+        out["prisma_8k_loud_noise"] = (to_pcm16(phone_line(samples, rate, "loud", seed)), 8000)
     return out
 
 
-async def run(only: str | None) -> None:
+async def run(only: str | None, model: str = "prisma-v2.5") -> None:
     from gnani.prisma import PrismaError
 
     clips = sorted(AUDIO.glob("*.wav"))
     if not clips:
         raise SystemExit(f"No recordings in {AUDIO}; run record.py first")
-    done = {row["id"]: row for row in read_jsonl(TRANSCRIPTS)} if TRANSCRIPTS.exists() else {}
+    target = transcripts_file(model)
+    done = {row["id"]: row for row in read_jsonl(target)} if target.exists() else {}
     wanted = [NAMES[only]] if only else list(NAMES.values())
     failed = 0
     for number, clip in enumerate(clips, 1):
@@ -111,7 +144,7 @@ async def run(only: str | None) -> None:
             continue
         for condition, (pcm, rate) in conditions(clip, todo).items():
             try:
-                row[condition] = await transcribe(pcm, rate)
+                row[condition] = await transcribe(pcm, rate, model)
             except (NoTranscript, PrismaError) as error:
                 # A dropped or refused Prisma session fails this clip only; the next run
                 # retries it.
@@ -120,7 +153,7 @@ async def run(only: str | None) -> None:
                 continue
             print(f"[{number}/{len(clips)}] {clip.stem} {condition}: {row[condition]}", flush=True)
             # Saved after every clip, so a stopped run loses nothing.
-            TRANSCRIPTS.write_text(
+            target.write_text(
                 "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in done.values()), "utf-8"
             )
     if failed:
@@ -130,10 +163,11 @@ async def run(only: str | None) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--only", choices=list(NAMES), help="one condition only")
+    parser.add_argument("--model", choices=MODELS, default="prisma-v2.5", help="Prisma model")
     args = parser.parse_args()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    asyncio.run(run(args.only))
+    asyncio.run(run(args.only, args.model))
 
 
 if __name__ == "__main__":

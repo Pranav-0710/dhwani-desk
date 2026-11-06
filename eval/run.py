@@ -27,11 +27,21 @@ from typing import Any
 
 from common import REPORTS, SCHEMA, SEED_FILE, fingerprint, label_errors, read_jsonl
 
-CONDITIONS = ("text", "prisma_16k", "prisma_8k_noise")
+CONDITIONS = (
+    "text",
+    "prisma_16k",
+    "prisma_8k_noise",
+    "prisma_8k_ulaw_noise",
+    "prisma_8k_loss_noise",
+    "prisma_8k_loud_noise",
+)
 CONDITION_LABEL = {
     "text": "written text",
     "prisma_16k": "spoken, Prisma 16 kHz",
     "prisma_8k_noise": "spoken, Prisma 8 kHz + noise",
+    "prisma_8k_ulaw_noise": "8 kHz, phone codec + noise",
+    "prisma_8k_loss_noise": "8 kHz, 3% packets lost + noise",
+    "prisma_8k_loud_noise": "8 kHz, noise as loud as the voice",
 }
 FLAGS = [name for name, spec in SCHEMA.items() if spec["type"] == "noul"]
 CHOICES = [name for name, spec in SCHEMA.items() if spec["type"] != "noul"]

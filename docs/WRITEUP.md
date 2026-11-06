@@ -29,7 +29,7 @@ Civic helplines in Kannada-speaking cities are built around English menus, offic
 | Training data | **Qwen3-14B** (4-bit) writes the synthetic caller sentences and checks their meaning | Kaggle, 2×T4 |
 | Fine-tuning | Laya's own fine-tuning code, 2 epochs for the live checkpoint | Kaggle, 2×T4 |
 
-The fine-tuned checkpoint and the datasets are in private Hugging Face repos (`Dhwanidesk/dhwani-desk-laya` at tag `kn-ft-v1`, `Dhwanidesk/dhwani-desk-data`). The backend pins the tag, and every ticket stores the checkpoint revision that decided it.
+We also tested Prisma v3.0 for speech to text. It did not pass our switch rule (Results), so the live call stays on v2.5. The fine-tuned checkpoint and the datasets are in private Hugging Face repos (`Dhwanidesk/dhwani-desk-laya` at tag `kn-ft-v1`, `Dhwanidesk/dhwani-desk-data`). The backend pins the tag, and every ticket stores the checkpoint revision that decided it.
 
 ## How it works
 
@@ -82,7 +82,22 @@ Held-out test set, spoken, Prisma at 16 kHz ([`eval/reports/test-kn-ft-v1-timbre
 
 On the noisy 8 kHz line, v2 caught 26 of 34 hazards against v1's 29. The fix for false hazards did not work, and it cost real ones. The test set is small, so a sentence or two can move these scores, but a missed emergency is the error we least accept. We did not tune v2 further against this test set, because that would stop it being a fair test.
 
-We also tried fixed phrases in code that always count as a hazard or a request for an officer ([`docs/decisions/safety-phrases.md`](decisions/safety-phrases.md)). They did well on generated rows but caught no extra hazards on the test set, so the same rule kept them out of live calls. The test set has now been used to compare three options, so its numbers are a little less clean than a test seen once.
+We also tried fixed phrases in code that always count as a hazard or a request for an officer ([`docs/decisions/safety-phrases.md`](decisions/safety-phrases.md)). They did well on generated rows but caught no extra hazards on the test set, so the same rule kept them out of live calls.
+
+**Harsher phone lines, and Prisma v3.0.** We also played the test audio through three harsher 8 kHz lines: a G.711 phone codec, 3% of 20 ms packets lost, and noise as loud as the voice (about 0 dB). Each one also had heavy noise. We transcribed every line with Prisma v2.5 and with the newer Prisma v3.0, and fixed the same switch rule before any v3.0 test transcript existed ([`eval/reports/switch-prisma-v3.0.md`](../eval/reports/switch-prisma-v3.0.md)). The decider was `kn-ft-v1` in every case.
+
+| Line | Department macro-F1, v2.5 | Hazards caught, v2.5 | Department macro-F1, v3.0 | Hazards caught, v3.0 |
+| --- | --- | --- | --- | --- |
+| 16 kHz, clean | **0.71** | **30 of 34** | 0.63 | 26 of 34 |
+| 8 kHz + heavy noise (about 6 dB) | **0.70** | **29 of 34** | 0.63 | 26 of 34 |
+| + phone codec | **0.69** | **28 of 34** | 0.63 | 27 of 34 |
+| + 3% packets lost | **0.70** | **30 of 34** | 0.64 | 25 of 34 |
+| Noise as loud as the voice | **0.67** | **25 of 34** | 0.60 | 23 of 34 |
+
+- On Prisma v2.5, the codec and lost packets cost almost nothing. Noise as loud as the voice is where it breaks: 5 more hazards missed and 0.04 lower department F1.
+- Prisma v3.0 caught more officer requests (4 of 7 against 3 of 7) and raised fewer false hazards. It missed 4 more real hazards, though, and routed departments worse, so the rule kept v2.5. Our decider was fine-tuned and tested on v2.5-style transcripts, so this says v3.0 does not suit *our* model as it stands. It does not say v3.0 transcribes Kannada worse.
+
+The test set has now been used to compare four options, so its numbers are a little less clean than a test seen once.
 
 **Latency** ([`docs/decisions/laya-latency.md`](decisions/laya-latency.md)): the agent says "ಸರಿ" ("okay") as soon as the caller finishes, about 1.5 s after their last word (the target is 1.5 s). The answer itself follows 3.7 to 6 s after the caller stopped on a busy laptop, about 2.8 s on a quieter run: Prisma's transcript (about 0.75 s), a 0.6 s pause to let the caller finish, Laya (1 to 4 s depending on load, mostly the safety step) and Timbre (about 0.3 s). On the first turn of a call, Prisma's first transcript sometimes took about 12 s.
 

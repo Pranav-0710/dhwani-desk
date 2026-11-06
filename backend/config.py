@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     gnani_stt_format: Literal["verbatim", "transcribe"] = "transcribe"
     gnani_stt_bias_file: Path = BACKEND_DIR / "gnani" / "stt_bias_words.json"
     gnani_stt_bias_score: float = 1.0
+    # Empty: Prisma v2.5, Prisma's default. "prisma-v3.0" only if eval/compare.py said SWITCH (#88).
+    gnani_stt_model: Literal["", "prisma-v2.5", "prisma-v3.0"] = ""
 
     gnani_tts_url: str = "https://api.vachana.ai/api/v1/tts"
     gnani_tts_lang: str = "kn-IN"

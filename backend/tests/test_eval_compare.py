@@ -124,3 +124,19 @@ def test_the_command_writes_the_decision_and_exits_with_it(
         compare.main()
     assert finished.value.code == 0
     assert (tmp_path / "switch-new.md").read_text("utf-8").startswith("# new against old: SWITCH")
+
+
+def test_the_new_answers_can_come_from_a_second_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old, new = tmp_path / "old.json", tmp_path / "new.json"
+    old.write_text(json.dumps({"kn-ft-v1": report()}), "utf-8")
+    new.write_text(json.dumps({"kn-ft-v1": improved()}), "utf-8")
+    monkeypatch.setattr(compare, "REPORTS", tmp_path)
+    args = ["--report", str(old), "--old", "kn-ft-v1", "--new", "kn-ft-v1"]
+    args += ["--new-report", str(new), "--name", "switch-stt"]
+    monkeypatch.setattr(sys, "argv", ["compare.py", *args])
+    with pytest.raises(SystemExit) as finished:
+        compare.main()
+    assert finished.value.code == 0
+    assert (tmp_path / "switch-stt.md").read_text("utf-8").startswith("# kn-ft-v1 against kn-ft-v1")
