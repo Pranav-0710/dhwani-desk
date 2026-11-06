@@ -1,0 +1,2368 @@
+{
+ "kn-ft-v1": {
+  "revision": "laya:Dhwanidesk/dhwani-desk-laya@5b31397f4d99cd287955846399ad4c3ae1a0f3f2",
+  "text": {
+   "n": 150,
+   "department": {
+    "accuracy": 0.76,
+    "macro_f1": 0.7678721284619642,
+    "routed_macro_f1": 0.7338749375243048
+   },
+   "ward": {
+    "accuracy": 0.9466666666666667
+   },
+   "urgency": {
+    "accuracy": 0.5133333333333333
+   },
+   "caller_state": {
+    "accuracy": 0.72
+   },
+   "safety_hazard": {
+    "recall": 0.8529411764705882,
+    "precision": 0.6170212765957447,
+    "raised": 47,
+    "true": 34
+   },
+   "has_location": {
+    "recall": 1.0,
+    "precision": 0.925531914893617,
+    "raised": 94,
+    "true": 87
+   },
+   "repeat_complaint": {
+    "recall": 0.38461538461538464,
+    "precision": 1.0,
+    "raised": 5,
+    "true": 13
+   },
+   "wants_human": {
+    "recall": 0.42857142857142855,
+    "precision": 0.5,
+    "raised": 6,
+    "true": 7
+   },
+   "out_of_scope": {
+    "recall": 0.3333333333333333,
+    "precision": 0.75,
+    "raised": 8,
+    "true": 18
+   },
+   "contains_personal_id": {
+    "recall": 1.0,
+    "precision": 1.0,
+    "raised": 4,
+    "true": 4
+   },
+   "safety_handoff": {
+    "recall": 0.8529411764705882,
+    "precision": 0.6170212765957447,
+    "raised": 47,
+    "true": 34
+   },
+   "latency": {
+    "safety_step_p95_s": 0.4014673000019684,
+    "whole_decision_p95_s": 1.1954358000002685,
+    "whole_decision_median_s": 1.0625723499997548
+   },
+   "mistakes": [
+    {
+     "id": "test-001",
+     "department": [
+      "water",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-005",
+     "department": [
+      "water",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-010",
+     "department": [
+      "water",
+      "other"
+     ]
+    },
+    {
+     "id": "test-011",
+     "department": [
+      "water",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-014",
+     "department": [
+      "water",
+      "other"
+     ]
+    },
+    {
+     "id": "test-015",
+     "department": [
+      "water",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-028",
+     "department": [
+      "sewage-drainage",
+      "other"
+     ]
+    },
+    {
+     "id": "test-032",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-034",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-037",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-039",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-040",
+     "department": [
+      "sewage-drainage",
+      "other"
+     ]
+    },
+    {
+     "id": "test-043",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-047",
+     "department": [
+      "solid-waste",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-048",
+     "department": [
+      "solid-waste",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-059",
+     "department": [
+      "solid-waste",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-060",
+     "department": [
+      "solid-waste",
+      "other"
+     ]
+    },
+    {
+     "id": "test-061",
+     "department": [
+      "solid-waste",
+      "other"
+     ]
+    },
+    {
+     "id": "test-067",
+     "department": [
+      "roads",
+      "other"
+     ]
+    },
+    {
+     "id": "test-072",
+     "department": [
+      "roads",
+      "water"
+     ]
+    },
+    {
+     "id": "test-073",
+     "department": [
+      "other",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-079",
+     "department": [
+      "roads",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-080",
+     "department": [
+      "roads",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-086",
+     "department": [
+      "roads",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-097",
+     "department": [
+      "other",
+      "streetlights"
+     ]
+    },
+    {
+     "id": "test-102",
+     "department": [
+      "streetlights",
+      "other"
+     ]
+    },
+    {
+     "id": "test-109",
+     "department": [
+      "stray-animals",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-117",
+     "department": [
+      "stray-animals",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-120",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-124",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-130",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-131",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-133",
+     "department": [
+      "other",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-134",
+     "department": [
+      "other",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-139",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-145",
+     "department": [
+      "other",
+      "roads"
+     ]
+    }
+   ]
+  },
+  "prisma_16k": {
+   "n": 150,
+   "department": {
+    "accuracy": 0.66,
+    "macro_f1": 0.6592173096374777,
+    "routed_macro_f1": 0.6305665906478293
+   },
+   "ward": {
+    "accuracy": 0.94
+   },
+   "urgency": {
+    "accuracy": 0.5
+   },
+   "caller_state": {
+    "accuracy": 0.7
+   },
+   "safety_hazard": {
+    "recall": 0.7647058823529411,
+    "precision": 0.6341463414634146,
+    "raised": 41,
+    "true": 34
+   },
+   "has_location": {
+    "recall": 0.9885057471264368,
+    "precision": 0.9772727272727273,
+    "raised": 88,
+    "true": 87
+   },
+   "repeat_complaint": {
+    "recall": 0.07692307692307693,
+    "precision": 1.0,
+    "raised": 1,
+    "true": 13
+   },
+   "wants_human": {
+    "recall": 0.5714285714285714,
+    "precision": 1.0,
+    "raised": 4,
+    "true": 7
+   },
+   "out_of_scope": {
+    "recall": 0.1111111111111111,
+    "precision": 0.6666666666666666,
+    "raised": 3,
+    "true": 18
+   },
+   "contains_personal_id": {
+    "recall": 0.75,
+    "precision": 1.0,
+    "raised": 3,
+    "true": 4
+   },
+   "safety_handoff": {
+    "recall": 0.7647058823529411,
+    "precision": 0.6341463414634146,
+    "raised": 41,
+    "true": 34
+   },
+   "latency": {
+    "safety_step_p95_s": 0.38288850000026287,
+    "whole_decision_p95_s": 1.1544739000019035,
+    "whole_decision_median_s": 1.035387850000916
+   },
+   "mistakes": [
+    {
+     "id": "test-003",
+     "department": [
+      "water",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-005",
+     "department": [
+      "water",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-010",
+     "department": [
+      "water",
+      "other"
+     ]
+    },
+    {
+     "id": "test-014",
+     "department": [
+      "water",
+      "other"
+     ]
+    },
+    {
+     "id": "test-015",
+     "department": [
+      "water",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-018",
+     "department": [
+      "water",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-021",
+     "department": [
+      "water",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-023",
+     "department": [
+      "sewage-drainage",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-028",
+     "department": [
+      "sewage-drainage",
+      "other"
+     ]
+    },
+    {
+     "id": "test-032",
+     "department": [
+      "other",
+      "water"
+     ]
+    },
+    {
+     "id": "test-033",
+     "department": [
+      "sewage-drainage",
+      "other"
+     ]
+    },
+    {
+     "id": "test-034",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-037",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-039",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-040",
+     "department": [
+      "sewage-drainage",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-043",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-047",
+     "department": [
+      "solid-waste",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-048",
+     "department": [
+      "solid-waste",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-056",
+     "department": [
+      "solid-waste",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-059",
+     "department": [
+      "solid-waste",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-072",
+     "department": [
+      "roads",
+      "water"
+     ]
+    },
+    {
+     "id": "test-073",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-079",
+     "department": [
+      "roads",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-080",
+     "department": [
+      "roads",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-086",
+     "department": [
+      "roads",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-087",
+     "department": [
+      "streetlights",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-088",
+     "department": [
+      "streetlights",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-089",
+     "department": [
+      "streetlights",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-090",
+     "department": [
+      "streetlights",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-093",
+     "department": [
+      "streetlights",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-096",
+     "department": [
+      "streetlights",
+      "other"
+     ]
+    },
+    {
+     "id": "test-097",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-099",
+     "department": [
+      "streetlights",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-100",
+     "department": [
+      "streetlights",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-101",
+     "department": [
+      "streetlights",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-102",
+     "department": [
+      "streetlights",
+      "other"
+     ]
+    },
+    {
+     "id": "test-103",
+     "department": [
+      "streetlights",
+      "water"
+     ]
+    },
+    {
+     "id": "test-109",
+     "department": [
+      "stray-animals",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-110",
+     "department": [
+      "stray-animals",
+      "other"
+     ]
+    },
+    {
+     "id": "test-117",
+     "department": [
+      "stray-animals",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-120",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-125",
+     "department": [
+      "other",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-128",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-129",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-130",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-131",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-133",
+     "department": [
+      "other",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-134",
+     "department": [
+      "other",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-139",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-145",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-150",
+     "department": [
+      "other",
+      "sewage-drainage"
+     ]
+    }
+   ]
+  },
+  "prisma_8k_noise": {
+   "n": 150,
+   "department": {
+    "accuracy": 0.68,
+    "macro_f1": 0.6810118353036093,
+    "routed_macro_f1": 0.63003293003293
+   },
+   "ward": {
+    "accuracy": 0.9466666666666667
+   },
+   "urgency": {
+    "accuracy": 0.49333333333333335
+   },
+   "caller_state": {
+    "accuracy": 0.68
+   },
+   "safety_hazard": {
+    "recall": 0.7647058823529411,
+    "precision": 0.6190476190476191,
+    "raised": 42,
+    "true": 34
+   },
+   "has_location": {
+    "recall": 0.9885057471264368,
+    "precision": 0.9662921348314607,
+    "raised": 89,
+    "true": 87
+   },
+   "repeat_complaint": {
+    "recall": 0.15384615384615385,
+    "precision": 1.0,
+    "raised": 2,
+    "true": 13
+   },
+   "wants_human": {
+    "recall": 0.42857142857142855,
+    "precision": 1.0,
+    "raised": 3,
+    "true": 7
+   },
+   "out_of_scope": {
+    "recall": 0.1111111111111111,
+    "precision": 1.0,
+    "raised": 2,
+    "true": 18
+   },
+   "contains_personal_id": {
+    "recall": 1.0,
+    "precision": 1.0,
+    "raised": 4,
+    "true": 4
+   },
+   "safety_handoff": {
+    "recall": 0.7647058823529411,
+    "precision": 0.6190476190476191,
+    "raised": 42,
+    "true": 34
+   },
+   "latency": {
+    "safety_step_p95_s": 0.37660610000239103,
+    "whole_decision_p95_s": 1.1527777000010246,
+    "whole_decision_median_s": 1.0239505500030646
+   },
+   "mistakes": [
+    {
+     "id": "test-003",
+     "department": [
+      "water",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-005",
+     "department": [
+      "water",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-014",
+     "department": [
+      "water",
+      "other"
+     ]
+    },
+    {
+     "id": "test-015",
+     "department": [
+      "water",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-021",
+     "department": [
+      "water",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-023",
+     "department": [
+      "sewage-drainage",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-028",
+     "department": [
+      "sewage-drainage",
+      "other"
+     ]
+    },
+    {
+     "id": "test-032",
+     "department": [
+      "other",
+      "water"
+     ]
+    },
+    {
+     "id": "test-033",
+     "department": [
+      "sewage-drainage",
+      "other"
+     ]
+    },
+    {
+     "id": "test-034",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-037",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-039",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-040",
+     "department": [
+      "sewage-drainage",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-043",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-047",
+     "department": [
+      "solid-waste",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-048",
+     "department": [
+      "solid-waste",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-056",
+     "department": [
+      "solid-waste",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-058",
+     "department": [
+      "solid-waste",
+      "other"
+     ]
+    },
+    {
+     "id": "test-059",
+     "department": [
+      "solid-waste",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-072",
+     "department": [
+      "roads",
+      "water"
+     ]
+    },
+    {
+     "id": "test-073",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-079",
+     "department": [
+      "roads",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-080",
+     "department": [
+      "roads",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-086",
+     "department": [
+      "roads",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-087",
+     "department": [
+      "streetlights",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-088",
+     "department": [
+      "streetlights",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-090",
+     "department": [
+      "streetlights",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-093",
+     "department": [
+      "streetlights",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-096",
+     "department": [
+      "streetlights",
+      "other"
+     ]
+    },
+    {
+     "id": "test-097",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-099",
+     "department": [
+      "streetlights",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-100",
+     "department": [
+      "streetlights",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-101",
+     "department": [
+      "streetlights",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-102",
+     "department": [
+      "streetlights",
+      "other"
+     ]
+    },
+    {
+     "id": "test-103",
+     "department": [
+      "streetlights",
+      "water"
+     ]
+    },
+    {
+     "id": "test-109",
+     "department": [
+      "stray-animals",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-110",
+     "department": [
+      "stray-animals",
+      "other"
+     ]
+    },
+    {
+     "id": "test-117",
+     "department": [
+      "stray-animals",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-120",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-125",
+     "department": [
+      "other",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-128",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-129",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-130",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-131",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-133",
+     "department": [
+      "other",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-134",
+     "department": [
+      "other",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-139",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-145",
+     "department": [
+      "other",
+      "roads"
+     ]
+    }
+   ]
+  },
+  "prisma_8k_ulaw_noise": {
+   "n": 150,
+   "department": {
+    "accuracy": 0.6866666666666666,
+    "macro_f1": 0.6865701561929407,
+    "routed_macro_f1": 0.6272009288836883
+   },
+   "ward": {
+    "accuracy": 0.9466666666666667
+   },
+   "urgency": {
+    "accuracy": 0.5
+   },
+   "caller_state": {
+    "accuracy": 0.68
+   },
+   "safety_hazard": {
+    "recall": 0.7941176470588235,
+    "precision": 0.627906976744186,
+    "raised": 43,
+    "true": 34
+   },
+   "has_location": {
+    "recall": 0.9885057471264368,
+    "precision": 0.9662921348314607,
+    "raised": 89,
+    "true": 87
+   },
+   "repeat_complaint": {
+    "recall": 0.15384615384615385,
+    "precision": 1.0,
+    "raised": 2,
+    "true": 13
+   },
+   "wants_human": {
+    "recall": 0.5714285714285714,
+    "precision": 1.0,
+    "raised": 4,
+    "true": 7
+   },
+   "out_of_scope": {
+    "recall": 0.1111111111111111,
+    "precision": 0.5,
+    "raised": 4,
+    "true": 18
+   },
+   "contains_personal_id": {
+    "recall": 1.0,
+    "precision": 1.0,
+    "raised": 4,
+    "true": 4
+   },
+   "safety_handoff": {
+    "recall": 0.7941176470588235,
+    "precision": 0.627906976744186,
+    "raised": 43,
+    "true": 34
+   },
+   "latency": {
+    "safety_step_p95_s": 0.39669010000216076,
+    "whole_decision_p95_s": 1.2045746000003419,
+    "whole_decision_median_s": 1.0556012500001088
+   },
+   "mistakes": [
+    {
+     "id": "test-003",
+     "department": [
+      "water",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-005",
+     "department": [
+      "water",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-014",
+     "department": [
+      "water",
+      "other"
+     ]
+    },
+    {
+     "id": "test-015",
+     "department": [
+      "water",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-021",
+     "department": [
+      "water",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-023",
+     "department": [
+      "sewage-drainage",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-028",
+     "department": [
+      "sewage-drainage",
+      "other"
+     ]
+    },
+    {
+     "id": "test-032",
+     "department": [
+      "other",
+      "water"
+     ]
+    },
+    {
+     "id": "test-033",
+     "department": [
+      "sewage-drainage",
+      "other"
+     ]
+    },
+    {
+     "id": "test-034",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-037",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-039",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-040",
+     "department": [
+      "sewage-drainage",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-043",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-047",
+     "department": [
+      "solid-waste",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-048",
+     "department": [
+      "solid-waste",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-056",
+     "department": [
+      "solid-waste",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-058",
+     "department": [
+      "solid-waste",
+      "other"
+     ]
+    },
+    {
+     "id": "test-059",
+     "department": [
+      "solid-waste",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-072",
+     "department": [
+      "roads",
+      "water"
+     ]
+    },
+    {
+     "id": "test-073",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-079",
+     "department": [
+      "roads",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-080",
+     "department": [
+      "roads",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-086",
+     "department": [
+      "roads",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-087",
+     "department": [
+      "streetlights",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-088",
+     "department": [
+      "streetlights",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-090",
+     "department": [
+      "streetlights",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-093",
+     "department": [
+      "streetlights",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-096",
+     "department": [
+      "streetlights",
+      "other"
+     ]
+    },
+    {
+     "id": "test-097",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-099",
+     "department": [
+      "streetlights",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-100",
+     "department": [
+      "streetlights",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-101",
+     "department": [
+      "streetlights",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-102",
+     "department": [
+      "streetlights",
+      "other"
+     ]
+    },
+    {
+     "id": "test-103",
+     "department": [
+      "streetlights",
+      "water"
+     ]
+    },
+    {
+     "id": "test-109",
+     "department": [
+      "stray-animals",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-110",
+     "department": [
+      "stray-animals",
+      "other"
+     ]
+    },
+    {
+     "id": "test-117",
+     "department": [
+      "stray-animals",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-120",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-125",
+     "department": [
+      "other",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-128",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-130",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-131",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-133",
+     "department": [
+      "other",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-134",
+     "department": [
+      "other",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-139",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-145",
+     "department": [
+      "other",
+      "roads"
+     ]
+    }
+   ]
+  },
+  "prisma_8k_loss_noise": {
+   "n": 150,
+   "department": {
+    "accuracy": 0.6866666666666666,
+    "macro_f1": 0.6889422653513917,
+    "routed_macro_f1": 0.6448168360421633
+   },
+   "ward": {
+    "accuracy": 0.9266666666666666
+   },
+   "urgency": {
+    "accuracy": 0.5066666666666667
+   },
+   "caller_state": {
+    "accuracy": 0.7
+   },
+   "safety_hazard": {
+    "recall": 0.7352941176470589,
+    "precision": 0.6097560975609756,
+    "raised": 41,
+    "true": 34
+   },
+   "has_location": {
+    "recall": 0.9885057471264368,
+    "precision": 0.9555555555555556,
+    "raised": 90,
+    "true": 87
+   },
+   "repeat_complaint": {
+    "recall": 0.15384615384615385,
+    "precision": 1.0,
+    "raised": 2,
+    "true": 13
+   },
+   "wants_human": {
+    "recall": 0.7142857142857143,
+    "precision": 1.0,
+    "raised": 5,
+    "true": 7
+   },
+   "out_of_scope": {
+    "recall": 0.1111111111111111,
+    "precision": 1.0,
+    "raised": 2,
+    "true": 18
+   },
+   "contains_personal_id": {
+    "recall": 1.0,
+    "precision": 1.0,
+    "raised": 4,
+    "true": 4
+   },
+   "safety_handoff": {
+    "recall": 0.7352941176470589,
+    "precision": 0.6097560975609756,
+    "raised": 41,
+    "true": 34
+   },
+   "latency": {
+    "safety_step_p95_s": 0.4058337999995274,
+    "whole_decision_p95_s": 1.2253172000018822,
+    "whole_decision_median_s": 1.0969110499991075
+   },
+   "mistakes": [
+    {
+     "id": "test-001",
+     "department": [
+      "water",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-003",
+     "department": [
+      "water",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-005",
+     "department": [
+      "water",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-014",
+     "department": [
+      "water",
+      "other"
+     ]
+    },
+    {
+     "id": "test-015",
+     "department": [
+      "water",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-021",
+     "department": [
+      "water",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-023",
+     "department": [
+      "sewage-drainage",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-028",
+     "department": [
+      "sewage-drainage",
+      "other"
+     ]
+    },
+    {
+     "id": "test-032",
+     "department": [
+      "other",
+      "water"
+     ]
+    },
+    {
+     "id": "test-033",
+     "department": [
+      "sewage-drainage",
+      "other"
+     ]
+    },
+    {
+     "id": "test-034",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-037",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-039",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-040",
+     "department": [
+      "sewage-drainage",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-043",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-047",
+     "department": [
+      "solid-waste",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-048",
+     "department": [
+      "solid-waste",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-056",
+     "department": [
+      "solid-waste",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-058",
+     "department": [
+      "solid-waste",
+      "other"
+     ]
+    },
+    {
+     "id": "test-059",
+     "department": [
+      "solid-waste",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-072",
+     "department": [
+      "roads",
+      "water"
+     ]
+    },
+    {
+     "id": "test-073",
+     "department": [
+      "other",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-079",
+     "department": [
+      "roads",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-080",
+     "department": [
+      "roads",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-086",
+     "department": [
+      "roads",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-087",
+     "department": [
+      "streetlights",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-088",
+     "department": [
+      "streetlights",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-090",
+     "department": [
+      "streetlights",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-096",
+     "department": [
+      "streetlights",
+      "other"
+     ]
+    },
+    {
+     "id": "test-097",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-099",
+     "department": [
+      "streetlights",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-100",
+     "department": [
+      "streetlights",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-101",
+     "department": [
+      "streetlights",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-102",
+     "department": [
+      "streetlights",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-103",
+     "department": [
+      "streetlights",
+      "water"
+     ]
+    },
+    {
+     "id": "test-109",
+     "department": [
+      "stray-animals",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-110",
+     "department": [
+      "stray-animals",
+      "other"
+     ]
+    },
+    {
+     "id": "test-117",
+     "department": [
+      "stray-animals",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-120",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-125",
+     "department": [
+      "other",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-128",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-129",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-130",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-131",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-134",
+     "department": [
+      "other",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-139",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-145",
+     "department": [
+      "other",
+      "roads"
+     ]
+    }
+   ]
+  },
+  "prisma_8k_loud_noise": {
+   "n": 150,
+   "department": {
+    "accuracy": 0.6533333333333333,
+    "macro_f1": 0.6563913038704907,
+    "routed_macro_f1": 0.5997477521477281
+   },
+   "ward": {
+    "accuracy": 0.8866666666666667
+   },
+   "urgency": {
+    "accuracy": 0.48
+   },
+   "caller_state": {
+    "accuracy": 0.6733333333333333
+   },
+   "safety_hazard": {
+    "recall": 0.6764705882352942,
+    "precision": 0.696969696969697,
+    "raised": 33,
+    "true": 34
+   },
+   "has_location": {
+    "recall": 0.9195402298850575,
+    "precision": 0.9523809523809523,
+    "raised": 84,
+    "true": 87
+   },
+   "repeat_complaint": {
+    "recall": 0.07692307692307693,
+    "precision": 1.0,
+    "raised": 1,
+    "true": 13
+   },
+   "wants_human": {
+    "recall": 0.5714285714285714,
+    "precision": 1.0,
+    "raised": 4,
+    "true": 7
+   },
+   "out_of_scope": {
+    "recall": 0.05555555555555555,
+    "precision": 1.0,
+    "raised": 1,
+    "true": 18
+   },
+   "contains_personal_id": {
+    "recall": 0.75,
+    "precision": 1.0,
+    "raised": 3,
+    "true": 4
+   },
+   "safety_handoff": {
+    "recall": 0.6764705882352942,
+    "precision": 0.696969696969697,
+    "raised": 33,
+    "true": 34
+   },
+   "latency": {
+    "safety_step_p95_s": 0.564623300000676,
+    "whole_decision_p95_s": 1.755976799999189,
+    "whole_decision_median_s": 1.3104079000004276
+   },
+   "mistakes": [
+    {
+     "id": "test-002",
+     "department": [
+      "water",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-003",
+     "department": [
+      "water",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-015",
+     "department": [
+      "water",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-021",
+     "department": [
+      "water",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-022",
+     "department": [
+      "water",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-023",
+     "department": [
+      "sewage-drainage",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-028",
+     "department": [
+      "sewage-drainage",
+      "other"
+     ]
+    },
+    {
+     "id": "test-029",
+     "department": [
+      "sewage-drainage",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-032",
+     "department": [
+      "other",
+      "water"
+     ]
+    },
+    {
+     "id": "test-034",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-039",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-040",
+     "department": [
+      "sewage-drainage",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-043",
+     "department": [
+      "sewage-drainage",
+      "water"
+     ]
+    },
+    {
+     "id": "test-044",
+     "department": [
+      "sewage-drainage",
+      "other"
+     ]
+    },
+    {
+     "id": "test-047",
+     "department": [
+      "solid-waste",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-048",
+     "department": [
+      "solid-waste",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-056",
+     "department": [
+      "solid-waste",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-058",
+     "department": [
+      "solid-waste",
+      "water"
+     ]
+    },
+    {
+     "id": "test-059",
+     "department": [
+      "solid-waste",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-061",
+     "department": [
+      "solid-waste",
+      "water"
+     ]
+    },
+    {
+     "id": "test-062",
+     "department": [
+      "solid-waste",
+      "other"
+     ]
+    },
+    {
+     "id": "test-072",
+     "department": [
+      "roads",
+      "water"
+     ]
+    },
+    {
+     "id": "test-073",
+     "department": [
+      "other",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-074",
+     "department": [
+      "roads",
+      "other"
+     ]
+    },
+    {
+     "id": "test-078",
+     "department": [
+      "roads",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-080",
+     "department": [
+      "roads",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-086",
+     "department": [
+      "roads",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-087",
+     "department": [
+      "streetlights",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-088",
+     "department": [
+      "streetlights",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-089",
+     "department": [
+      "streetlights",
+      "water"
+     ]
+    },
+    {
+     "id": "test-096",
+     "department": [
+      "streetlights",
+      "other"
+     ]
+    },
+    {
+     "id": "test-099",
+     "department": [
+      "streetlights",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-100",
+     "department": [
+      "streetlights",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-101",
+     "department": [
+      "streetlights",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-102",
+     "department": [
+      "streetlights",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-103",
+     "department": [
+      "streetlights",
+      "water"
+     ]
+    },
+    {
+     "id": "test-109",
+     "department": [
+      "stray-animals",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-113",
+     "department": [
+      "stray-animals",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-117",
+     "department": [
+      "stray-animals",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-120",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-121",
+     "department": [
+      "stray-animals",
+      "solid-waste"
+     ]
+    },
+    {
+     "id": "test-125",
+     "department": [
+      "other",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-128",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-129",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-130",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-131",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-133",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-134",
+     "department": [
+      "other",
+      "roads"
+     ]
+    },
+    {
+     "id": "test-138",
+     "department": [
+      "other",
+      "water"
+     ]
+    },
+    {
+     "id": "test-139",
+     "department": [
+      "other",
+      "stray-animals"
+     ]
+    },
+    {
+     "id": "test-142",
+     "department": [
+      "other",
+      "sewage-drainage"
+     ]
+    },
+    {
+     "id": "test-145",
+     "department": [
+      "other",
+      "roads"
+     ]
+    }
+   ]
+  }
+ }
+}
