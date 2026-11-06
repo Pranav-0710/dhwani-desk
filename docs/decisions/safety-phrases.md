@@ -1,6 +1,17 @@
 # Decision: fixed safety phrases around Laya
 
-Status: **proposed.** The list is committed before it is scored. It goes into live calls only if `eval/compare.py` says SWITCH on the held-out test set, scored once.
+Status: **not used.** The list was committed and pushed before it was scored (commit `90555db`). It was then scored once on the held-out set on 2026-11-06, and `eval/compare.py` said KEEP (`eval/reports/switch-kn-ft-v1-phrases.md`). Live calls run `kn-ft-v1` without it. The code stays, so `eval/run.py --laya-phrases` can score a revised list.
+
+## Result on the held-out set
+
+| | `kn-ft-v1` | with phrases |
+| --- | --- | --- |
+| Hazards caught, 16 kHz | 30 of 34 (52 raised) | 30 of 34 (53 raised) |
+| Hazards caught, 8 kHz + noise | 29 of 34 | 29 of 34 |
+| Officer requests caught, 16 kHz | 3 of 7 | 3 of 7 |
+| Officer requests caught, 8 kHz + noise | 2 of 7 | 3 of 7 |
+
+It caught no extra hazards and added one false alarm. The gain on the generated rows (below) came mostly from the generator reusing the same request wordings, as feared: the test set's callers ask in other words.
 
 ## Why
 
