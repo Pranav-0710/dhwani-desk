@@ -8,8 +8,12 @@ import random
 import wave
 from pathlib import Path
 
-# The phone page's levels (console/src/audio/noise.ts): RMS on a -1..1 scale.
-NOISE_RMS = {"light": 0.02, "heavy": 0.063}
+# The phone page's levels (console/src/audio/noise.ts): RMS on a -1..1 scale. "loud" matches the
+# test clips' median speech level (0.126), so the noise is as loud as the voice: about 0 dB.
+NOISE_RMS = {"light": 0.02, "heavy": 0.063, "loud": 0.126}
+# A lost packet on a voice-over-IP line: 20 ms of silence.
+PACKET_S = 0.02
+MU = 255
 # RMS of Paul Kellet's economy pink filter for unit white noise (noise.ts PINK_RMS).
 PINK_RMS = 2.97
 # Half-band low-pass before dropping every other sample: windowed sinc, cut-off at 3.6 kHz.
@@ -95,6 +99,27 @@ def phone_line(samples: list[float], rate: int, level: str = "heavy", seed: int 
     narrow = to_8k(samples, rate)
     noise = pink_noise(len(narrow), NOISE_RMS[level], random.Random(seed))
     return [max(-1.0, min(1.0, s + n)) for s, n in zip(narrow, noise, strict=True)]
+
+
+def mu_law(samples: list[float]) -> list[float]:
+    """Through a G.711 mu-law codec and back: 8 bits a sample, as on a phone network."""
+    out = []
+    for s in samples:
+        s = max(-1.0, min(1.0, s))
+        coded = math.copysign(math.log1p(MU * abs(s)) / math.log1p(MU), s)
+        level = round((coded + 1) / 2 * 255) / 255 * 2 - 1  # the 8-bit value sent on the line
+        out.append(math.copysign(math.expm1(abs(level) * math.log1p(MU)) / MU, level))
+    return out
+
+
+def drop_packets(samples: list[float], rate: int, share: float, rng: random.Random) -> list[float]:
+    """`share` of the 20 ms packets lost and played as silence."""
+    size = round(rate * PACKET_S)
+    out = list(samples)
+    for start in range(0, len(out), size):
+        if rng.random() < share:
+            out[start : start + size] = [0.0] * len(out[start : start + size])
+    return out
 
 
 def rms(samples: list[float]) -> float:

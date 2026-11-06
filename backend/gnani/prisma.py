@@ -1,4 +1,4 @@
-"""Thin client for Gnani Prisma v2.5 realtime speech-to-text.
+"""Thin client for Gnani Prisma realtime speech-to-text: v2.5 by default, v3.0 with `model`.
 
 Protocol: https://docs.gnani.ai/api/STT/stt-websocket. Audio goes up as binary frames of
 exactly 1,024 bytes (512 samples of 16-bit little-endian mono PCM) at real-time cadence;
@@ -80,6 +80,8 @@ class PrismaConfig:
     bias_words: tuple[str, ...] = ()
     bias_score: float | None = None
     min_silence_ms: int | None = None
+    # Empty: Prisma's default, v2.5. "prisma-v3.0" selects v3.0.
+    model: str = ""
 
     def headers(self) -> dict[str, str]:
         headers = {
@@ -95,6 +97,8 @@ class PrismaConfig:
                 headers["x-bias-score"] = str(self.bias_score)
         if self.min_silence_ms is not None:
             headers["x-min-silence-ms"] = str(self.min_silence_ms)
+        if self.model:
+            headers["model"] = self.model
         return headers
 
 

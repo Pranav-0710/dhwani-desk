@@ -59,6 +59,11 @@ def test_headers_omit_bias_when_no_words() -> None:
     assert "x-bias-score" not in headers
 
 
+def test_the_model_header_is_sent_only_when_set() -> None:
+    assert "model" not in PrismaConfig(api_key="k").headers()
+    assert PrismaConfig(api_key="k", model="prisma-v3.0").headers()["model"] == "prisma-v3.0"
+
+
 def test_config_repr_never_shows_the_api_key() -> None:
     assert "SENTINEL-KEY" not in repr(PrismaConfig(api_key="SENTINEL-KEY"))
 

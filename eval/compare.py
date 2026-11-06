@@ -22,6 +22,9 @@ Gains (at least one):
 Usage, from the repo root:
     python eval/compare.py --report eval/reports/test-kn-ft-v2.json --old kn-ft-v1 --new kn-ft-v2
 
+`--new-report` takes the new answers from a second report, to compare the same checkpoint on two
+speech models' transcripts (#88).
+
 Writes `eval/reports/switch-<new>.md`. Exit code 0 means SWITCH, 1 means KEEP.
 """
 
@@ -185,14 +188,18 @@ def main() -> None:
     parser.add_argument("--report", type=Path, required=True, help="eval/run.py's JSON report")
     parser.add_argument("--old", required=True, help="the live checkpoint's name in the report")
     parser.add_argument("--new", required=True, help="the new checkpoint's name in the report")
+    parser.add_argument("--new-report", type=Path, help="take --new from this report instead")
+    parser.add_argument("--name", help="report name (default: switch-<new>)")
     args = parser.parse_args()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
 
     results = json.loads(args.report.read_text("utf-8"))
-    switch, guards, won = decide(results[args.old], results[args.new])
+    new_results = json.loads(args.new_report.read_text("utf-8")) if args.new_report else results
+    switch, guards, won = decide(results[args.old], new_results[args.new])
     text = render(args.old, args.new, switch, guards, won)
-    (REPORTS / f"switch-{args.new}.md").write_text(text, "utf-8")
+    name = args.name or f"switch-{args.new}"
+    (REPORTS / f"{name}.md").write_text(text, "utf-8")
     print(text)
     sys.exit(0 if switch else 1)
 

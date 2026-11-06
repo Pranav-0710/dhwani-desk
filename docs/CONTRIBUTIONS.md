@@ -62,3 +62,4 @@ From 2026-10-28 Lakshmi Narasimman is away again, and Jey Pranav is doing the re
 | 2026-11-05 | Jey Pranav | #84 | Second fine-tune finished (#67): hand check and filter for the `v2.0` data, `kn-ft-v2` trained and scored; it missed more hazards, so the switch rule kept `kn-ft-v1` (#83) |
 | 2026-11-05 | Jey Pranav | #85 | Write-up with results, models used and the rejected second fine-tune; README results and run steps; team list and contributions brought up to date (#24) |
 | 2026-11-06 | Jey Pranav | #87 | Safety phrase net around the decider, committed before scoring, then scored once and kept out of live calls by the switch rule; newest-turn screening measured and rejected (#86) |
+| 2026-11-06 | Jey Pranav | #89 | Harsher phone lines in the eval (codec, lost packets, noise as loud as the voice) and Prisma v3.0 as an option, with the switch rule fixed first (#88) |
