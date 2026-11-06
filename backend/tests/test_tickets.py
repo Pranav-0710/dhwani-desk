@@ -31,7 +31,7 @@ def request(**overrides: object) -> TicketRequest:
 @pytest.mark.parametrize(
     ("text", "personal_id", "expected"),
     [
-        ("ನನ್ನ ನಂಬರ್ 9876543210", 0.1, "ನನ್ನ ನಂಬರ್ XXXXXXXXXX"),
+        ("ನನ್ನ ನಂಬರ್ 0123456789", 0.1, "ನನ್ನ ನಂಬರ್ XXXXXXXXXX"),
         ("ಆಧಾರ್ 1234 5678 9012 ಲಿಂಕ್", 0.1, "ಆಧಾರ್ XXXX XXXX XXXX ಲಿಂಕ್"),
         ("98450-12345 ಗೆ ಕಾಲ್ ಮಾಡಿ", 0.1, "XXXXX-XXXXX ಗೆ ಕಾಲ್ ಮಾಡಿ"),
         # Short numbers stay unless the decider heard a personal ID...
@@ -52,6 +52,20 @@ def request(**overrides: object) -> TicketRequest:
         ),
         ("ನೈನ್ ಎಯ್ಟ್ ಫೋರ್ ಫೈವ್ 0 1 2 3 4 5", 0.1, "XXXX XXXXX XXXX XXXX X X X X X X"),
         ("ಖಾತೆ ಫೋರ್ ಫೈವ್ ಟೂ ಒನ್", 0.9, "ಖಾತೆ XXXX XXXX XX XXX"),
+        # "Double" and "triple" count their digit twice or three times: 10 digits here.
+        (
+            "ಡಬಲ್ ಒಂಬತ್ತು ಎಂಟು ನಾಲ್ಕು ಐದು ಸೊನ್ನೆ ಒಂದು ಎರಡು ಮೂರು ನಾಲ್ಕು",
+            0.1,
+            "XXXX XXXXXXX XXXX XXXXXX XXX XXXXXX XXXX XXXX XXXX XXXXXX",
+        ),
+        ("98450 ಟ್ರಿಪಲ್ 1 23", 0.1, "XXXXX XXXXXXX X XX"),
+        # English digit words in Latin script.
+        ("nine eight four five 0 1 2 3 4 5", 0.1, "XXXX XXXXX XXXX XXXX X X X X X X"),
+        ("Double Nine 8 4 5 0 1 2 3 4", 0.1, "XXXXXX XXXX X X X X X X X X"),
+        # A double in a sentence, or nine digits, is not a phone number.
+        ("ಡಬಲ್ ರೋಡ್ ಹತ್ತಿರ", 0.1, "ಡಬಲ್ ರೋಡ್ ಹತ್ತಿರ"),
+        ("double 9 8 4 5 0 1 2 3", 0.1, "double 9 8 4 5 0 1 2 3"),
+        ("someone phoned", 0.9, "someone phoned"),
         # Number words in a sentence are not a number: three days, one week.
         ("ಮೂರು ದಿನದಿಂದ ಒಂದು ವಾರ ಆರು ಗಂಟೆ", 0.9, "ಮೂರು ದಿನದಿಂದ ಒಂದು ವಾರ ಆರು ಗಂಟೆ"),
     ],
@@ -87,7 +101,7 @@ def test_a_ticket_keeps_the_location_but_masks_a_number_in_it(ticket_store) -> N
 
 def test_transcripts_are_masked_and_deleted_after_the_retention_period(ticket_store) -> None:
     ticket_store.record_turn("call-1", 1, "ರೋಡ್ ಹಾಳಾಗಿದೆ", 0.1)
-    ticket_store.record_turn("call-1", 2, "ನನ್ನ ನಂಬರ್ 9876543210", 0.1)
+    ticket_store.record_turn("call-1", 2, "ನನ್ನ ನಂಬರ್ 0123456789", 0.1)
     assert ticket_store.transcript("call-1") == ["ರೋಡ್ ಹಾಳಾಗಿದೆ", "ನನ್ನ ನಂಬರ್ XXXXXXXXXX"]
 
     assert ticket_store.purge_transcripts(7) == 0  # nothing is old yet

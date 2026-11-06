@@ -63,7 +63,10 @@ export class ConsoleClient {
     }
     socket.onclose = (event) => {
       this.failPending('The console lost its connection')
-      this.onStatus(event.code === 1008 ? 'refused' : 'closed', reason ?? undefined)
+      // Refused only when the server said so before closing: the page then forgets the token,
+      // so a bare 1008 (any other policy close) must not cost the officer a good one.
+      const refused = event.code === 1008 && reason !== null
+      this.onStatus(refused ? 'refused' : 'closed', reason ?? undefined)
     }
     this.socket = socket
   }

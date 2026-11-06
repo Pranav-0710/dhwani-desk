@@ -37,20 +37,68 @@ DIGIT_WORDS = [
     "ಎಯ್ಟ್",
     "ನೈನ್",
 ]
+# English digit words in Latin script, and "double"/"triple" before a digit ("ಡಬಲ್ ಒಂಬತ್ತು" is
+# two nines), so a number said that way still counts all its digits.
+ENGLISH_DIGIT_WORDS = [
+    "zero",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+]
+REPEATS = {
+    "ಡಬಲ್": 2,
+    "ಟ್ರಿಪಲ್": 3,
+    "double": 2,
+    "triple": 3,
+}
 _KANNADA = r"\u0c80-\u0cff"  # the Kannada block
+_LATIN = "A-Za-z"
+
+
+def _whole_words(words: list[str], script: str) -> str:
+    """Any of `words`, not inside a longer word of the same script (ಒಂದು, not ಒಂದುಕಡೆ)."""
+    alternatives = "|".join(sorted(words, key=len, reverse=True))
+    return rf"(?<![{script}])(?:{alternatives})(?![{script}])"
+
+
 _DIGIT = (
-    rf"(?:\d|(?<![{_KANNADA}])(?:"
-    + "|".join(sorted(DIGIT_WORDS, key=len, reverse=True))
-    + rf")(?![{_KANNADA}]))"
+    rf"(?:\d|{_whole_words(DIGIT_WORDS, _KANNADA)}"
+    rf"|(?i:{_whole_words(ENGLISH_DIGIT_WORDS, _LATIN)}))"
+)
+_REPEAT = (
+    rf"(?:{_whole_words(['ಡಬಲ್', 'ಟ್ರಿಪಲ್'], _KANNADA)}"
+    rf"|(?i:{_whole_words(['double', 'triple'], _LATIN)}))"
 )
 _GAP = r"[\s,.\-/()]{0,3}"
-LONG_WORDED_NUMBER = re.compile(rf"{_DIGIT}(?:{_GAP}{_DIGIT}){{9,}}")
-ID_LIKE_WORDED_NUMBER = re.compile(rf"{_DIGIT}(?:{_GAP}{_DIGIT}){{3,}}")
+# One spoken digit, or "double"/"triple" and a digit; a worded number is a run of them.
+_UNIT = rf"(?:{_REPEAT}{_GAP})?{_DIGIT}"
+WORDED_RUN = re.compile(rf"{_UNIT}(?:{_GAP}{_UNIT})*")
+UNIT = re.compile(_UNIT)
+REPEAT_WORD = re.compile(_REPEAT)
+LONG_DIGITS, ID_LIKE_DIGITS = 10, 4
+
+
+def _digits_in(run: str) -> int:
+    """How many digits a worded run says: "double" and "triple" count their digit twice or
+    three times."""
+    extra = sum(REPEATS[word.lower()] - 1 for word in REPEAT_WORD.findall(run))
+    return len(UNIT.findall(run)) + extra
+
+
+def _worded_numbers(text: str, digits: int) -> list[tuple[int, int]]:
+    """Where `text` says a number of at least `digits` digits, in digits or digit words."""
+    return [m.span() for m in WORDED_RUN.finditer(text) if _digits_in(m.group()) >= digits]
 
 
 def says_long_number(text: str) -> bool:
     """A phone, Aadhaar or account number, in digits or in digit words."""
-    return bool(LONG_NUMBER.search(text) or LONG_WORDED_NUMBER.search(text))
+    return bool(LONG_NUMBER.search(text) or _worded_numbers(text, LONG_DIGITS))
 
 
 def mask_personal_ids(text: str, personal_id: float) -> str:
@@ -61,9 +109,11 @@ def mask_personal_ids(text: str, personal_id: float) -> str:
     (`contains_personal_id`). Long digit runs are masked whatever it says. Every digit
     becomes exactly one X, so the masked text has the same length as the original.
     """
-    worded = ID_LIKE_WORDED_NUMBER if personal_id > PERSONAL_ID else LONG_WORDED_NUMBER
-    # Every letter and digit of a worded number becomes X; the gaps between them stay.
-    text = worded.sub(lambda match: re.sub(r"[^\s,.\-/()]", MASK, match.group()), text)
+    digits = ID_LIKE_DIGITS if personal_id > PERSONAL_ID else LONG_DIGITS
+    # Every letter and digit of a worded number becomes X; the gaps between them stay. Spans
+    # are found first and masking keeps lengths, so later spans stay in place.
+    for start, end in _worded_numbers(text, digits):
+        text = text[:start] + re.sub(r"[^\s,.\-/()]", MASK, text[start:end]) + text[end:]
     pattern = ID_LIKE_NUMBER if personal_id > PERSONAL_ID else LONG_NUMBER
     return pattern.sub(lambda match: re.sub(r"\d", MASK, match.group()), text)
 
