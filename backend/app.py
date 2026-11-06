@@ -615,10 +615,14 @@ async def _converse(
                 return
             if first is not None and (handed_off := dialogue.screened(first)) is not None:
                 # Safety first: the turn is stored and the hand-off said before the rest is
-                # decided, since a caller told to call 112 may hang up at once. Masked as if it
-                # held a personal number, as no decision says otherwise yet. The rest follows
-                # for the officer as a `dialogue` event with no lines.
-                await store_turn(1.0)
+                # decided, since a caller told to call 112 may hang up at once. A failed write
+                # is logged, never allowed to silence the hand-off. Masked as if it held a
+                # personal number, as no decision says otherwise yet. The rest follows for the
+                # officer as a `dialogue` event with no lines.
+                try:
+                    await store_turn(1.0)
+                except Exception:
+                    logger.exception("Storing the turn behind a safety hand-off failed")
                 await answer(handed_off)
                 try:
                     screening = await screen_whole_call(first)

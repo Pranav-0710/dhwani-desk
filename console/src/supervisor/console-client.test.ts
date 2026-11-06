@@ -57,6 +57,14 @@ describe('ConsoleClient', () => {
     expect(statuses.at(-1)).toEqual(['refused', 'Not allowed'])
   })
 
+  it('keeps the token on a policy close the server gave no reason for', () => {
+    const { socket, statuses } = connect()
+
+    socket.onclose?.({ code: 1008 })
+
+    expect(statuses.at(-1)).toEqual(['closed', undefined])
+  })
+
   it("settles each command by the server's answer to its id", async () => {
     const { socket, client } = connect()
 

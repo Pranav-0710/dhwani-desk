@@ -445,6 +445,29 @@ def test_a_safety_risk_is_handed_off_before_the_rest_is_decided(
     assert decider.decided == ["ರಸ್ತೆ"]
 
 
+def test_a_failed_turn_write_never_silences_the_safety_hand_off(
+    monkeypatch: pytest.MonkeyPatch, ticket_store: TicketStore
+) -> None:
+    def locked(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(ticket_store, "record_turn", locked)
+    danger = dataclasses.replace(ROADS_IN_W04, safety_hazard=0.9)
+    use_dialogue_fakes(monkeypatch, FakeTts(), ScriptedDecider(danger))
+
+    def decided_in_full(sent: list) -> bool:
+        return [] in lines_of(sent, "dialogue", "keys")
+
+    browser = ScriptedBrowser([bytes(1024)], leave_when=decided_in_full)
+    asyncio.run(app_module.call(browser))
+
+    dialogue = [m for m in browser.sent if isinstance(m, dict) and m["type"] == "dialogue"]
+    assert [m["keys"] for m in dialogue] == [["greeting"], ["safety"], []]
+    assert app_module.TEMPLATES.lines["safety"] in lines_of(browser.sent, "agent_text", "text")
+    # The officer still gets the rest of the decision.
+    assert (dialogue[-1]["state"], dialogue[-1]["reason"]) == ("handed_off", "safety")
+
+
 def test_the_turn_behind_a_safety_hand_off_is_kept_if_the_caller_hangs_up(
     monkeypatch: pytest.MonkeyPatch, ticket_store: TicketStore
 ) -> None:

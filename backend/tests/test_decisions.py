@@ -41,6 +41,14 @@ def test_code_answers_the_ward_and_personal_number_as_the_seed_set_labels_them(r
         ("ನಾಲ್ಕನೇ ವಾರ್ಡ್ ಅಲ್ಲಿ ಕಸ", "w04"),
         ("4ನೇ ವಾರ್ಡ್", "w04"),
         ("ವಾರ್ಡ್ ನಂಬರ್ 10", "w10"),
+        ("ವಾರ್ಡ್ ೪ ಅಲ್ಲಿ ಕಸ", "w04"),  # Kannada digits
+        ("೪ನೇ ವಾರ್ಡ್", "w04"),
+        ("ವಾರ್ಡ್ 04", "w04"),  # a leading zero
+        ("ವಾರ್ಡ್ ನಂ 4", "w04"),
+        ("ward 4 ಅಲ್ಲಿ ಕಸ", "w04"),  # Latin script, as Prisma sometimes writes it
+        ("Ward No. 10", "w10"),
+        ("ವಾರ್ಡ್ ೧೧", "unknown"),  # still no such ward
+        ("forward 4 ಸಲ ಕಳಿಸಿದೆ", "unknown"),  # "ward" inside another word
         ("ವಾರ್ಡ್ 11 ಅಲ್ಲಿ ಕಸ", "unknown"),  # no such ward
         ("ನಮ್ಮ ಮನೆ ಹತ್ತಿರ ಕಸ", "unknown"),
     ],
@@ -101,7 +109,7 @@ def test_the_safety_step_asks_laya_only_the_safety_questions() -> None:
 def test_the_full_decision_combines_laya_code_and_the_safety_step() -> None:
     laya = FakeLaya()
     decider = LayaDecider(laya, "laya:test@abc")
-    transcript = "ಹೂವಿನಕೇರಿ ಅಲ್ಲಿ ನೀರು ಬಂದಿಲ್ಲ ನನ್ನ ನಂಬರ್ 9876543210"
+    transcript = "ಹೂವಿನಕೇರಿ ಅಲ್ಲಿ ನೀರು ಬಂದಿಲ್ಲ ನನ್ನ ನಂಬರ್ 0123456789"
     screening = Screening(safety_hazard=0.12, urgency="soon", wants_human=0.05, out_of_scope=0.2)
 
     decision = decider.decide(transcript, screening)

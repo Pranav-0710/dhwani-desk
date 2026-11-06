@@ -278,6 +278,36 @@ def test_unreachable_server_raises_prisma_unavailable() -> None:
         asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("reply", [b"", b"not http at all\r\n\r\n"])
+def test_a_broken_handshake_raises_prisma_unavailable(reply: bytes) -> None:
+    """A server that hangs up, or answers garbage, mid-handshake: retried like a drop."""
+
+    async def broken(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await reader.readuntil(b"\r\n\r\n")
+        writer.write(reply)
+        await writer.drain()
+        writer.close()
+
+    async def scenario() -> None:
+        server = await asyncio.start_server(broken, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        config = PrismaConfig(api_key="k", url=f"ws://127.0.0.1:{port}")
+        async with server, PrismaStream(config):
+            pass
+
+    with pytest.raises(PrismaUnavailable):
+        asyncio.run(scenario())
+
+
+def test_a_bad_url_raises_prisma_unavailable() -> None:
+    async def scenario() -> None:
+        async with PrismaStream(PrismaConfig(api_key="k", url="not a url")):
+            pass
+
+    with pytest.raises(PrismaUnavailable):
+        asyncio.run(scenario())
+
+
 def test_faster_than_real_time_client_gets_overflow() -> None:
     async def fake_prisma(connection: ServerConnection) -> None:
         async for _ in connection:

@@ -69,8 +69,9 @@ def _alternatives(words: dict[str, str]) -> str:
 
 
 WARD_NUMBER = re.compile(
-    # ವಾರ್ಡ್ 4, ವಾರ್ಡ್ ನಂಬರ್ 4, ವಾರ್ಡ್ ಫೋರ್, ವಾರ್ಡ್ ನಾಲ್ಕು
-    r"ವಾರ್ಡ್\s*(?:ನಂಬರ್\s*)?(?P<after>\d+(?!\d)|"
+    # ವಾರ್ಡ್ 4, ವಾರ್ಡ್ ನಂಬರ್ 4, ವಾರ್ಡ್ ನಂ 4, ward 4, ವಾರ್ಡ್ ಫೋರ್, ವಾರ್ಡ್ ನಾಲ್ಕು. `\d` also
+    # matches Kannada digits (೪), turned to ASCII below.
+    r"(?:ವಾರ್ಡ್|(?<![A-Za-z])(?i:ward))\s*(?:(?:ನಂಬರ್|ನಂ|(?i:number|no))\.?\s*)?(?P<after>\d+(?!\d)|"
     + _alternatives(NUMBER_BY_WORD)
     + ")"
     # 4ನೇ ವಾರ್ಡ್, 4 ನೇ ವಾರ್ಡ್, ನಾಲ್ಕನೇ ವಾರ್ಡ್
@@ -96,7 +97,8 @@ def find_ward(transcript: str) -> str:
             number = NUMBER_BY_ORDINAL[match["word"]]
         else:
             raw = match["after"] or match["ordinal"]
-            number = NUMBER_BY_WORD.get(raw, raw)
+            # int() reads Kannada digits and drops leading zeros: ೪ and 04 are ward 4.
+            number = str(int(raw)) if raw.isdecimal() else NUMBER_BY_WORD.get(raw, raw)
         if ward_id := WARD_BY_NUMBER.get(number):
             # In squashed coordinates, so names and numbers compare by position.
             position = len(_squash(normalised[: match.start()]))

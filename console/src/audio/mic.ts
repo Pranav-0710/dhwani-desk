@@ -26,17 +26,27 @@ export type StartMic = (
   onLevel?: (rms: number) => void,
 ) => Promise<Mic>
 
+/** One batch of line audio, as 16-bit PCM. */
+export interface LineBatch {
+  /** What goes down the line now: the caller (silence while muted) with the line noise. */
+  sent: Int16Array<ArrayBuffer>
+  /** The caller with the same noise on top, kept while muted for a barge-in to send. */
+  caller: Int16Array<ArrayBuffer>
+}
+
 /**
- * One batch as it goes down the line: the caller's sound (silence while muted) with the
- * line noise on top, as 16-bit PCM. Muting silences the caller, not the line, so the noise
- * carries on through the agent's turn as it would on a real call.
+ * One batch as it goes down the line. Muting silences the caller, not the line, so the noise
+ * carries on through the agent's turn as it would on a real call. The noise is drawn once,
+ * so what a barge-in sends later has exactly the noise the line had then.
  */
 export function lineBatch(
   samples: Float32Array<ArrayBuffer>,
   muted: boolean,
   noise: NoiseMixer,
-): Int16Array<ArrayBuffer> {
-  return floatToInt16(noise.mix(muted ? new Float32Array(samples.length) : samples))
+): LineBatch {
+  const noiseOnly = noise.mix(new Float32Array(samples.length))
+  const caller = floatToInt16(samples.map((sample, i) => sample + noiseOnly[i]))
+  return { sent: muted ? floatToInt16(noiseOnly) : caller, caller }
 }
 
 /**
@@ -74,8 +84,10 @@ export const startMic: StartMic = async (targetRate, onPcm, muted, onLevel) => {
         const batch = Float32Array.from(pending)
         onLevel?.(rmsOf(batch))
         const isMuted = muted()
-        onPcm(lineBatch(batch, isMuted, noise))
-        if (isMuted) recent = [...recent, floatToInt16(batch)].slice(-RECENT_BATCHES)
+        const { sent, caller } = lineBatch(batch, isMuted, noise)
+        onPcm(sent)
+        // With the line noise on, so a barge-in sounds like the rest of the call.
+        if (isMuted) recent = [...recent, caller].slice(-RECENT_BATCHES)
         else recent = []
         pending = []
       }

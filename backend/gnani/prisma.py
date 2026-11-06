@@ -18,7 +18,13 @@ from types import TracebackType
 from typing import Any, Literal, Self, get_args
 
 from websockets.asyncio.client import ClientConnection, connect
-from websockets.exceptions import ConnectionClosed, ConnectionClosedError, InvalidStatus
+from websockets.exceptions import (
+    ConnectionClosed,
+    ConnectionClosedError,
+    InvalidHandshake,
+    InvalidStatus,
+    InvalidURI,
+)
 
 FRAME_BYTES = 1024
 SAMPLES_PER_FRAME = FRAME_BYTES // 2
@@ -185,7 +191,8 @@ class PrismaStream:
             self._ws = await connect(self.config.url, additional_headers=self.config.headers())
         except InvalidStatus as exc:
             raise PrismaRejected(exc.response.status_code) from exc
-        except (OSError, TimeoutError, ConnectionClosed) as exc:
+        except (OSError, TimeoutError, ConnectionClosed, InvalidHandshake, InvalidURI) as exc:
+            # InvalidHandshake: the connection dropped or sent garbage mid-handshake.
             raise PrismaUnavailable(type(exc).__name__) from exc
         self._sender = asyncio.create_task(self._send_loop())
         return self
