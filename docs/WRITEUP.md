@@ -82,6 +82,8 @@ Held-out test set, spoken, Prisma at 16 kHz ([`eval/reports/test-kn-ft-v1-timbre
 
 On the noisy 8 kHz line, v2 caught 26 of 34 hazards against v1's 29. The fix for false hazards did not work, and it cost real ones. The test set is small, so a sentence or two can move these scores, but a missed emergency is the error we least accept. We did not tune v2 further against this test set, because that would stop it being a fair test.
 
+We also tried fixed phrases in code that always count as a hazard or a request for an officer ([`docs/decisions/safety-phrases.md`](decisions/safety-phrases.md)). They did well on generated rows but caught no extra hazards on the test set, so the same rule kept them out of live calls. The test set has now been used to compare three options, so its numbers are a little less clean than a test seen once.
+
 **Latency** ([`docs/decisions/laya-latency.md`](decisions/laya-latency.md)): the agent says "ಸರಿ" ("okay") as soon as the caller finishes, about 1.5 s after their last word (the target is 1.5 s). The answer itself follows 3.7 to 6 s after the caller stopped on a busy laptop, about 2.8 s on a quieter run: Prisma's transcript (about 0.75 s), a 0.6 s pause to let the caller finish, Laya (1 to 4 s depending on load, mostly the safety step) and Timbre (about 0.3 s). On the first turn of a call, Prisma's first transcript sometimes took about 12 s.
 
 ## What we would do next

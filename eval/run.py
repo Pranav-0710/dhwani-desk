@@ -67,6 +67,13 @@ def laya_decider(source: str) -> Any:
     return decider
 
 
+def laya_with_phrases(source: str) -> Any:
+    """The same checkpoint with the fixed safety phrases around it."""
+    from decisions.safety_phrases import WithSafetyPhrases
+
+    return WithSafetyPhrases(laya_decider(source))
+
+
 def weights_hash(onnx_dir: Path) -> str:
     digest = hashlib.sha256()
     for path in sorted(onnx_dir.glob("model.onnx*")):
@@ -350,6 +357,13 @@ def main() -> None:
         metavar="NAME=SOURCE",
         help="a Laya checkpoint: NAME=dir or NAME=repo@revision; repeatable",
     )
+    parser.add_argument(
+        "--laya-phrases",
+        action="append",
+        default=[],
+        metavar="NAME=SOURCE",
+        help="a Laya checkpoint with the safety phrases around it; repeatable",
+    )
     parser.add_argument("--name", help="report file name (default: the set and today's date)")
     parser.add_argument(
         "--note", default="", help="added to the report's opening: how the audio was made"
@@ -396,6 +410,11 @@ def main() -> None:
         if not source:
             parser.error(f"--laya {spec!r}: use NAME=SOURCE")
         deciders[name] = lambda source=source: laya_decider(source)
+    for spec in args.laya_phrases:
+        name, _, source = spec.partition("=")
+        if not source:
+            parser.error(f"--laya-phrases {spec!r}: use NAME=SOURCE")
+        deciders[name] = lambda source=source: laya_with_phrases(source)
 
     results = evaluate(deciders, rows, transcripts)
     name = args.name or f"{args.set}-{datetime.now(UTC):%Y-%m-%d}"
