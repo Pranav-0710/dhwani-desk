@@ -141,6 +141,8 @@ class Dialogue:
     _apologised: bool = False
     # How many turns had been said when an officer last handed the call back.
     _handed_back_at: int | None = None
+    # How many turns had been said when a decision was last remembered.
+    _remembered_turns: int = 0
 
     def greet(self) -> Reply:
         return self._reply(("greeting",))
@@ -316,8 +318,12 @@ class Dialogue:
             decision.ward != "unknown" or decision.has_location > HAS_LOCATION
         )
         new_ward = decision.ward not in ("unknown", self.slots.ward)
-        if (new_place or new_ward) and self.turns:
-            self.location_turns.append(self.turns[-1])
+        # The turns no decision has read yet: the caller's last one, or after a hand-back all
+        # that was told to the officer (the place may not be the last thing said).
+        unread = self.turns[self._remembered_turns :] or self.turns[-1:]
+        self._remembered_turns = len(self.turns)
+        if new_place or new_ward:
+            self.location_turns.extend(unread)
         if decision.ward != "unknown":
             self.slots.ward = decision.ward
         if decision.ward != "unknown" or decision.has_location > HAS_LOCATION:

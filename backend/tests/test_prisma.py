@@ -222,6 +222,21 @@ def test_a_flush_with_nothing_buffered_is_not_an_overflow() -> None:
     asyncio.run(scenario())
 
 
+def test_trimming_the_backlog_keeps_the_newest_audio() -> None:
+    async def scenario() -> tuple[int, list[bytes]]:
+        stream = PrismaStream(PrismaConfig(api_key="k", sample_rate=8000))
+        # Never connected, so nothing drains: 10 frames, each a different byte.
+        for n in range(10):
+            await stream.send_audio(bytes([n]) * FRAME_BYTES)
+        dropped = stream.trim_backlog(3 * FRAME_BYTES / 2 / 8000)
+        return dropped, [stream._frames.get_nowait() for _ in range(stream._frames.qsize())]
+
+    dropped, kept = asyncio.run(scenario())
+
+    assert dropped == 7
+    assert [frame[0] for frame in kept] == [7, 8, 9]
+
+
 def test_prismas_error_text_is_logged_and_not_passed_on(caplog) -> None:
     async def fake_prisma(connection: ServerConnection) -> None:
         await connection.send(json.dumps({"type": "error", "message": "account 42 is out of cash"}))
