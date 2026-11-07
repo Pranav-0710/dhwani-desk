@@ -233,6 +233,16 @@ class PrismaStream:
         while not self._frames.empty():
             self._frames.get_nowait()
 
+    def trim_backlog(self, seconds: float) -> int:
+        """Drop the oldest unsent frames beyond `seconds` of audio; returns how many went.
+        For catching up after a gap, when keeping up matters more than the oldest audio."""
+        keep = int(seconds / self._frame_seconds)
+        dropped = 0
+        while self._frames.qsize() > keep:
+            self._frames.get_nowait()
+            dropped += 1
+        return dropped
+
     async def events(self) -> AsyncIterator[SttEvent]:
         """Server events until Prisma closes. A clean close ends the iterator; check
         `close_code` / `close_reason` afterwards. An abnormal close raises PrismaClosed."""

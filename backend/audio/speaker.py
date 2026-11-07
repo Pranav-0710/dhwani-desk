@@ -99,11 +99,18 @@ class Speaker:
     async def _speak(self, text: str) -> None:
         await self._outbox.json({"type": "agent_text", "text": text})
         await self._outbox.json({"type": "agent_audio_start", "sample_rate": self._sample_rate})
+        # A send that fails means the caller hung up mid-line: not a TTS failure, and nothing
+        # more can be sent. Raised after the TTS stream is closed, for `_run` to stop on.
+        browser_gone: Exception | None = None
         try:
             async with asyncio.timeout(UTTERANCE_DEADLINE_S):
                 async with contextlib.aclosing(self._tts.stream(text)) as chunks:
                     async for pcm in chunks:
-                        await self._outbox.audio(pcm)
+                        try:
+                            await self._outbox.audio(pcm)
+                        except (WebSocketDisconnect, RuntimeError, OSError) as exc:
+                            browser_gone = exc
+                            break
                         self._played(pcm)
         except asyncio.CancelledError:
             raise
@@ -114,6 +121,8 @@ class Speaker:
         except Exception:
             logger.exception("Unexpected TTS failure")
             await self._outbox.json({"type": "tts_error", "message": TTS_FAILED})
+        if browser_gone is not None:
+            raise browser_gone
         await self._outbox.json({"type": "agent_audio_end"})
 
     def _played(self, pcm: bytes) -> None:

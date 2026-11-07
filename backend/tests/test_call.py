@@ -7,11 +7,19 @@ from collections.abc import AsyncIterator
 
 import pytest
 from fakes import ROADS_IN_W04, FakeStream, ScriptedBrowser, ScriptedDecider, use_fakes
+from websockets.asyncio.server import ServerConnection, serve
 
 import app as app_module
 from audio.speaker import TTS_FAILED, Speaker
 from dialogue.decision import Decision, Screening
-from gnani.prisma import PrismaClosed, PrismaRejected, SttEvent
+from gnani.prisma import (
+    PrismaClosed,
+    PrismaConfig,
+    PrismaOverflow,
+    PrismaRejected,
+    PrismaStream,
+    SttEvent,
+)
 from gnani.timbre import TimbreError
 from tickets.store import TicketStore
 
@@ -208,7 +216,8 @@ def test_a_dropped_prisma_session_is_replaced_without_greeting_again(
     use_dialogue_fakes(monkeypatch, tts)
     broken = FakeStream()
     broken.audio_error = PrismaClosed(1011, "error")
-    streams = [broken, FakeStream()]
+    resumed = FakeStream()
+    streams = [broken, resumed]
     monkeypatch.setattr(app_module, "stt_stream_factory", lambda settings: streams.pop(0))
     monkeypatch.setattr(app_module, "STT_RECONNECT_DELAY_S", 0.01)
     browser = ScriptedBrowser([bytes(1024), bytes(1024)], leave_when=ended_lines(2))
@@ -218,6 +227,46 @@ def test_a_dropped_prisma_session_is_replaced_without_greeting_again(
     assert lines_of(browser.sent, "dialogue", "keys") == [["greeting"], ["ask_problem"]]
     assert not [m for m in browser.sent if isinstance(m, dict) and m["type"] == "error"]
     assert streams == []
+    # The new session keeps only the newest audio from the gap.
+    assert resumed.trims == [app_module.STT_RESUME_BACKLOG_S]
+
+
+class BackloggedBrowser:
+    """A phone page whose audio piled up while Prisma reconnected: all of it is there at once."""
+
+    def __init__(self, seconds: float) -> None:
+        self.frames = [bytes(640)] * round(seconds / 0.04)  # 40 ms batches at 8 kHz
+
+    async def receive(self) -> dict:
+        if self.frames:
+            return {"type": "websocket.receive", "bytes": self.frames.pop()}
+        await asyncio.sleep(0.05)
+        return {"type": "websocket.disconnect", "code": 1001}
+
+
+@pytest.mark.parametrize("catch_up_s", [0.0, app_module.STT_RESUME_CATCH_UP_S])
+def test_a_resumed_session_drops_a_backlog_rather_than_overflowing(catch_up_s: float) -> None:
+    async def fake_prisma(connection: ServerConnection) -> None:
+        async for _ in connection:
+            pass
+
+    async def ignore(event: SttEvent) -> None:
+        return None
+
+    async def scenario() -> str:
+        async with serve(fake_prisma, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            config = PrismaConfig(api_key="k", url=f"ws://127.0.0.1:{port}", sample_rate=8000)
+            async with PrismaStream(config) as stream:
+                return await app_module._relay(
+                    BackloggedBrowser(5.0), stream, ignore, catch_up_s=catch_up_s
+                )
+
+    if catch_up_s:
+        assert asyncio.run(scenario()) == "browser"
+    else:
+        with pytest.raises(PrismaOverflow):
+            asyncio.run(scenario())
 
 
 def test_a_call_gives_up_when_prisma_keeps_failing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -591,6 +640,30 @@ def test_unexpected_tts_failure_still_ends_the_line_and_keeps_going() -> None:
         {"type": "agent_audio_end"},
     ]
     assert outbox.sent[4] == {"type": "agent_text", "text": "ಸರಿ"}
+
+
+def test_a_hang_up_mid_line_is_not_logged_as_a_tts_failure(caplog) -> None:
+    class HungUpOutbox(RecordingOutbox):
+        async def audio(self, pcm: bytes) -> None:
+            raise RuntimeError("Cannot send once the socket is closed")
+
+    outbox = HungUpOutbox()
+
+    async def scenario() -> None:
+        speaker = Speaker(FakeTts(), outbox, sample_rate=8000)
+        speaker.say("ನಮಸ್ಕಾರ")
+        speaker.say("ಸರಿ")
+        await asyncio.sleep(0.05)
+        await speaker.aclose()
+
+    asyncio.run(scenario())
+
+    # Nothing more is sent to a socket that has gone, and no TTS failure is logged.
+    assert outbox.sent == [
+        {"type": "agent_text", "text": "ನಮಸ್ಕಾರ"},
+        {"type": "agent_audio_start", "sample_rate": 8000},
+    ]
+    assert "TTS failure" not in caplog.text
 
 
 def test_call_reports_tts_error_and_keeps_the_call_open(monkeypatch: pytest.MonkeyPatch) -> None:

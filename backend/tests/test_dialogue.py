@@ -408,6 +408,21 @@ def test_after_a_hand_back_the_agent_finishes_the_call_with_what_the_officer_hea
     assert (reply.keys, reply.reason) == (("read_back_ward", "closing"), "ticket")
 
 
+def test_a_place_told_to_the_officer_is_kept_even_if_it_was_not_the_last_turn() -> None:
+    danger = dataclasses.replace(ROADS, safety_hazard=0.9)
+    call, _ = dialogue(danger, dataclasses.replace(ROADS_IN_W04, safety_hazard=0.9))
+    call.turn("ವೈರ್ ಬಿದ್ದಿದೆ")
+    call.take_over()
+    call.turn("ಗಾಂಧಿನಗರ ಸ್ಕೂಲ್ ಹತ್ತಿರ")
+    call.turn("ಹೌದು")  # "yes", to the officer: on its own it tells the field team nothing
+    call.hand_back()
+
+    call.rethink()
+
+    filed = call.desk.filed[-1]
+    assert filed.location_text == "ಗಾಂಧಿನಗರ ಸ್ಕೂಲ್ ಹತ್ತಿರ ಹೌದು"
+
+
 def test_a_hand_back_does_not_bounce_on_other_rules_the_old_words_trip() -> None:
     # A frightened caller at a live wire: once the officer hands back, neither the danger nor
     # the distress already dealt with may hand the call straight back.

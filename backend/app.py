@@ -155,6 +155,10 @@ HANG_UP_GRACE_S = 0.5
 # call opens a new one this many times before giving up.
 STT_RECONNECTS = 3
 STT_RECONNECT_DELAY_S = 0.5
+# The browser keeps sending through the gap, so a new session starts with a backlog that would
+# overflow Prisma's buffer. For this long after reconnecting, only the newest audio is kept.
+STT_RESUME_CATCH_UP_S = 2.0
+STT_RESUME_BACKLOG_S = 1.0
 # A console must say hello with the token within this long. Longer than any real hello, which is
 # under 100 characters: the limit is read before the text is parsed, for a stranger's socket.
 CONSOLE_HELLO_TIMEOUT_S = 5.0
@@ -697,8 +701,10 @@ async def _converse(
                 await record_turn(1.0)
 
         async def answer_turns() -> None:
-            # Only the decider runs in threads (it may be slow); the dialogue changes here, on
-            # the event loop, so a call that ends while a decision is running files nothing.
+            # The decider runs in threads (it may be slow) and the dialogue changes only once it
+            # is back here, so a call that ends while a decision is running files nothing. The
+            # closing reply's own ticket write also runs in a thread, which a hang-up cannot
+            # stop: a caller who leaves during that write still has the complaint filed.
             while True:
                 item = await work.get()
                 try:
@@ -747,6 +753,7 @@ async def _converse(
                     on_barge_in=barge_in,
                     failures=failures,
                     ends_at=ends_at,
+                    resumed=attempt > 0,
                 )
                 # Retry only what a new session can fix: Prisma closing on its own, or a failed
                 # connect. A rejected key or an audio overflow would fail again the same way.
@@ -781,17 +788,20 @@ async def _stt_session(
     on_barge_in: Callable[[], None] | None = None,
     failures: list[PrismaError] | None = None,
     ends_at: float | None = None,
+    resumed: bool = False,
 ) -> FinalMessage | None:
     """Run one Prisma session for this socket. Returns the message to end the session with,
     or None when the browser left or `stop` was set (the caller has nothing more to send).
-    A Prisma failure is also appended to `failures`, for a caller deciding whether to retry."""
+    A Prisma failure is also appended to `failures`, for a caller deciding whether to retry.
+    A `resumed` session follows a dropped one, so it drops the stale audio it starts with."""
     # 16-bit audio, so two bytes a sample.
     min_audio = int(settings.gnani_stt_sample_rate * 2 * stt_quiet_s * settings.min_audio_share)
     try:
         async with stt_stream_factory(settings) as stream:
             await outbox.json(config)
+            catch_up_s = STT_RESUME_CATCH_UP_S if resumed else 0.0
             ended_by = await _relay(
-                websocket, stream, on_event, stop, on_barge_in, min_audio, ends_at
+                websocket, stream, on_event, stop, on_barge_in, min_audio, ends_at, catch_up_s
             )
             if ended_by in ("browser", "agent"):
                 stream.discard_pending()
@@ -823,11 +833,13 @@ async def _relay(
     on_barge_in: Callable[[], None] | None = None,
     min_audio: int = 0,
     ends_at: float | None = None,
+    catch_up_s: float = 0.0,
 ) -> str:
     """Pump audio up and events down until one side ends or `stop` is set; returns "browser",
     "prisma", "agent", "quiet" (under `min_audio` bytes of audio in `stt_quiet_s`, or none at all)
     or "too_long" (`ends_at` came, by default `stt_max_session_s` from now). A `barge_in` text
-    frame (the caller spoke over the agent) goes to `on_barge_in`."""
+    frame (the caller spoke over the agent) goes to `on_barge_in`. For the first `catch_up_s`,
+    audio queued for Prisma is cut to the newest `STT_RESUME_BACKLOG_S`."""
     went_quiet = too_long = False
 
     async def pump_audio() -> None:
@@ -835,6 +847,8 @@ async def _relay(
         loop = asyncio.get_running_loop()
         deadline = loop.time() + stt_quiet_s
         end_of_session = loop.time() + stt_max_session_s if ends_at is None else ends_at
+        catching_up_until = loop.time() + catch_up_s
+        stale_frames = 0
         # Audio since `deadline` was last set. The first audio sets it afresh: the mic opens only
         # once the caller has answered the browser's permission prompt.
         heard = 0
@@ -866,6 +880,11 @@ async def _relay(
                     deadline = loop.time() + stt_quiet_s
                 heard += len(message["bytes"])
                 await stream.send_audio(message["bytes"])
+                if loop.time() < catching_up_until:
+                    stale_frames += stream.trim_backlog(STT_RESUME_BACKLOG_S)
+                elif stale_frames:
+                    logger.info("Dropped %d stale audio frames after reconnecting", stale_frames)
+                    stale_frames = 0
             elif message.get("text") == "flush":
                 await stream.flush()
             elif message.get("text") == "barge_in" and on_barge_in is not None:

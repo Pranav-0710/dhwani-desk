@@ -30,6 +30,7 @@ class FakeStream:
         self.audio = bytearray()
         self.flushed = False
         self.discarded = False
+        self.trims: list[float] = []
         self.enter_error = enter_error
         self.audio_error: Exception | None = None
         self.close_code: int | None = None
@@ -61,6 +62,10 @@ class FakeStream:
 
     def discard_pending(self) -> None:
         self.discarded = True
+
+    def trim_backlog(self, seconds: float) -> int:
+        self.trims.append(seconds)
+        return 0
 
     def close_cleanly(self, code: int, reason: str) -> None:
         self.close_code, self.close_reason = code, reason
