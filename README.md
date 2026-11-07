@@ -277,7 +277,7 @@ A 10% hand check of the training set found the labels right in 97% of rows, but 
 
 - **Better Kannada training data.** Native speakers writing or fixing the sentences is the biggest remaining lever. A regenerated set did not fix it.
 - **Keep the officer-request gain** from `kn-ft-v2` without losing hazard recall.
-- **A faster safety step** (int8, once it keeps the fine-tuned answers), so the answer follows the acknowledgement sooner.
+- **A faster safety step.** We tested int8 on the fine-tuned model: about 6× faster, but it dropped 23 of the live model's safety hand-offs on 350 non-test sentences, so we kept fp32 ([details](docs/decisions/laya-latency.md#what-was-tried)). Next is quantization-aware fine-tuning or a smaller model.
 - **Real voices and a real phone line.** The test audio is synthetic speech, so the numbers measure the line and Prisma, not real callers. Next is real voices reading the test set, and a SIP line through LiveKit.
 - **Labels checked by a non-native reader.** The labels and the test set were checked against written rules, not by a native Kannada speaker.
 
