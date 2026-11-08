@@ -75,3 +75,7 @@ Known gap: the backend asks Laya about everything the caller has said so far, an
 `kn-ft-v2` was trained on the dataset tag `v2.0`. `clean_v2.py` builds that set from the generator's 2,837 rows, using the hand-check verdicts in `results/v2-hand-check.json` (row ids only). Its output matches the files on the Hub apart from line endings: the Hub copies have Windows line endings, which JSON readers ignore.
 
 The checkpoint did not replace `kn-ft-v1`: it caught more officer requests but missed more hazards, so the rule in `eval/compare.py` kept `kn-ft-v1` (`eval/reports/switch-kn-ft-v2.md`). `.env.example` still pins `kn-ft-v1`.
+
+## Third fine-tune (#99)
+
+`kn-ft-v3` keeps `kn-ft-v1`'s recipe (dataset tag `v1.0`, 2 epochs, seed 0, effective batch 64) and adds only the 356 `v2.0` rows labelled `wants_human` (112 of them hazards), with `--add-rows v2.0:wants_human`. Their ids are prefixed `v2.0:`, so they cannot clash with v1's. The aim is to keep v2's officer-request gain without the drain and road changes that cost it hazards. The recipe and the switch rule were fixed in #99 before training, and it is scored once by `eval/compare.py`.
