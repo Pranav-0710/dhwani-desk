@@ -100,6 +100,14 @@ def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
             out.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def rows_flagged(rows: list[dict[str, Any]], tag: str, flag: str) -> list[dict[str, Any]]:
+    """The rows whose yes/no label `flag` is yes, for adding to another version's training set.
+    Ids are prefixed with the version's tag: each version numbers its rows from the start."""
+    if SCHEMA.get(flag, {}).get("type") != "noul" or flag not in LAYA_ANSWERS:
+        raise SystemExit(f"{flag!r} is not a yes/no question Laya is trained on")
+    return [{**row, "id": f"{tag}:{row['id']}"} for row in rows if row["labels"][flag] is True]
+
+
 def check_labels(rows: list[dict[str, Any]]) -> None:
     """Stop before training on a label the questions cannot express (a schema drift)."""
     for row in rows:
@@ -370,6 +378,11 @@ def main() -> None:
     parser.add_argument("--dataset-tag", default="v1.0", help="dataset repo tag to train on")
     parser.add_argument("--tag-dataset", action="store_true", help="make --dataset-tag if missing")
     parser.add_argument("--train-file", type=Path, help="a local train.jsonl instead of the Hub")
+    parser.add_argument(
+        "--add-rows",
+        metavar="TAG:FLAG",
+        help="also train on the rows of dataset tag TAG labelled yes for FLAG (v2.0:wants_human)",
+    )
     parser.add_argument("--limit", type=int, help="train on the first N rows only (a smoke run)")
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--micro-batch", type=int, default=8)
@@ -392,7 +405,16 @@ def main() -> None:
     else:
         commit = pinned_dataset(args.dataset_tag, args.tag_dataset)
         source, dataset = download_train(commit, args.out / "data"), f"{DATASET_REPO}@{commit}"
-    rows = read_jsonl(source)[: args.limit]
+    rows = read_jsonl(source)
+    if args.add_rows:
+        tag, flag = args.add_rows.split(":")
+        extra_commit = pinned_dataset(tag, False)
+        extra = rows_flagged(
+            read_jsonl(download_train(extra_commit, args.out / "extra")), tag, flag
+        )
+        rows += extra
+        dataset += f" + {len(extra)} {flag} rows of {DATASET_REPO}@{extra_commit}"
+    rows = rows[: args.limit]
     check_labels(rows)
     data = args.out / "laya_train.jsonl"
     write_jsonl(data, [training_row(row) for row in rows])

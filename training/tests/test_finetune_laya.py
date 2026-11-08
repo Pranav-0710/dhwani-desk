@@ -41,6 +41,22 @@ def test_urgency_is_trained_as_its_level_index() -> None:
     assert ft.training_row(row)["expected"]["urgency"] == 3
 
 
+def test_rows_added_from_another_version_are_the_flagged_ones_with_new_ids() -> None:
+    added = ft.rows_flagged(SEED, "v2.0", "wants_human")
+
+    assert added
+    assert len(added) == sum(row["labels"]["wants_human"] for row in SEED)
+    assert all(row["labels"]["wants_human"] is True for row in added)
+    assert all(row["id"].startswith("v2.0:") for row in added)
+    assert {row["id"] for row in added}.isdisjoint(row["id"] for row in SEED)
+
+
+@pytest.mark.parametrize("flag", ["department", "ward", "no_such_question"])
+def test_only_a_trained_yes_no_question_can_pick_rows(flag: str) -> None:
+    with pytest.raises(SystemExit, match="not a yes/no question"):
+        ft.rows_flagged(SEED, "v2.0", flag)
+
+
 def test_a_label_outside_the_schema_stops_the_run() -> None:
     row = json.loads(json.dumps(SEED[0]))
     row["labels"]["department"] = "electricity"
