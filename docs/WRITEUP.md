@@ -104,7 +104,7 @@ The test set has now been used to compare four options, so its numbers are a lit
 ## What we would do next
 
 - Train on better Kannada: have native speakers write or fix the training sentences. Generating a new set did not fix this: in our hand check, by a non-native reader, only 35% of the second set's sentences read as natural. The officer-request gain in `kn-ft-v2` is worth keeping, so the next run should add those rows without losing hazard recall.
-- Make the safety step faster (int8, once it keeps the fine-tuned model's answers), so the answer follows the acknowledgement sooner.
+- Make the safety step faster, so the answer follows the acknowledgement sooner. Post-training int8 is not the way: on the fine-tuned model it was about 6× faster but dropped 23 of the live model's safety hand-offs on 350 non-test sentences ([`docs/decisions/laya-latency.md`](decisions/laya-latency.md)). Quantization-aware fine-tuning or a smaller model is next.
 - Test with real voices reading the test set, and on a real phone line (LiveKit).
 
 ## Privacy

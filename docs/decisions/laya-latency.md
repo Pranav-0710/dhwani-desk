@@ -1,6 +1,6 @@
 # Decision: how Laya fits in the live call
 
-Status: **serve Laya as fp32 ONNX on 8 CPU threads, safety questions first, with "one moment" spoken while the rest runs.** The PRD's old target of 300 ms for every question in one batch cannot be met on the laptop's CPU by a 322M-parameter model. The targets are now ≤ 0.6 s p95 for the safety questions and ≤ 2.5 s p95 for the whole decision on a caller's first turn; it measures 0.54 s and 1.70 s. Laya rereads the whole call every turn, so later turns are slower. Measured 2026-10-20 to 2026-10-23, base multilingual checkpoint, Laya 0.4.6, laptop CPU (Intel Core Ultra 7 155H, 16 GB, on mains power). **Measure again on the fine-tuned checkpoint (#14)** with the script below; it is the same size, so the timings should hold, but int8 may become usable.
+Status: **serve Laya as fp32 ONNX on 8 CPU threads, safety questions first, with "one moment" spoken while the rest runs.** The PRD's old target of 300 ms for every question in one batch cannot be met on the laptop's CPU by a 322M-parameter model. The targets are now ≤ 0.6 s p95 for the safety questions and ≤ 2.5 s p95 for the whole decision on a caller's first turn; it measures 0.54 s and 1.70 s. Laya rereads the whole call every turn, so later turns are slower. Measured 2026-10-20 to 2026-10-23, base multilingual checkpoint, Laya 0.4.6, laptop CPU (Intel Core Ultra 7 155H, 16 GB, on mains power). **Measure again on the fine-tuned checkpoint (#14)** with the script below; it is the same size, so the timings should hold. int8 was retested on it on 2026-11-07 and is still not usable ("What was tried").
 
 ## What a caller turn costs
 
@@ -27,7 +27,7 @@ Loading takes ~15 s (about a minute when the 1.3 GB weights are not yet in the d
 1. The caller stops talking. After a 0.6 s pause the turn is complete (`dialogue/turns.py`).
 2. Laya answers the four questions that can end the call at once: danger, how urgent, a request for an officer, not a civic matter.
 3. If danger or an emergency comes back, or else a request for an officer, the hand-off line plays straight away from the audio cache. The rest of the decision then runs anyway, so the officer who takes over sees the department and ward on the console. The turn is stored before the line plays, since a caller told to call 112 may hang up at once.
-4. Otherwise, if the rest takes longer than 0.3 s, the agent says "ಸರಿ, ಒಂದು ಕ್ಷಣ" ("okay, one moment"), also from the cache. On a first turn that comes ~1.35 s after the caller stopped (0.6 + 0.45 + 0.3), inside the PRD's "first agent audio ≤ 1.5 s", and the reply ~2.0 s after. On a call three sentences long, "one moment" comes ~1.9 s and the reply ~3.4 s after the caller stopped: that misses the target, and is the case to recheck on the fine-tuned checkpoint and with int8.
+4. Otherwise, if the rest takes longer than 0.3 s, the agent says "ಸರಿ, ಒಂದು ಕ್ಷಣ" ("okay, one moment"), also from the cache. On a first turn that comes ~1.35 s after the caller stopped (0.6 + 0.45 + 0.3), inside the PRD's "first agent audio ≤ 1.5 s", and the reply ~2.0 s after. On a call three sentences long, "one moment" comes ~1.9 s and the reply ~3.4 s after the caller stopped: that misses the target, and is the case to recheck on the fine-tuned checkpoint. int8 would have helped here, but it changes the answers (below).
 
 Splitting the decision never changes what the caller hears, only when: `Dialogue.screened` applies the same rules, in the same order, as `Dialogue.respond`. That is why urgency is in the safety step: `respond` treats an emergency as a safety risk ahead of a request for an officer, so "my father has chest pain, connect me to an officer" must hear "call 112", not just "connecting you". "Not a civic matter" alone does not end the call at step 2: a distressed caller with a police matter is handed off, not redirected, and only the full decision knows how the caller is.
 
@@ -47,9 +47,18 @@ Timed on one long fixture (all eight questions in one run), before the split:
 | ONNX fp32, ONNX Runtime's default threads | 9.3 s | yes (max logit difference ~1e-5) |
 | **ONNX fp32, 8 threads** | **4.5 s** | yes |
 | ONNX int8 (dynamic quantization) | 2.0–2.7 s | **no: 58 of 80 answers match** |
+| ONNX int8 on `kn-ft-v1`, plain or per-channel (#97) | about 6× faster | **no: drops 23 of the fp32 model's safety hand-offs in 350 transcripts** |
 
 - **Threads.** The default thread count fights over the laptop's mix of performance and efficiency cores. `LAYA_THREADS=8` is set on the decider's own ONNX Runtime session.
-- **int8 is not used.** It halves the time, but the base checkpoint is unsure about Kannada: most of its yes/no answers sit near 0.5, and int8's rounding flips them (largest change 0.83). Per-channel and weights-only variants did not help. A fine-tuned checkpoint should answer far more confidently, so test int8 again on it, against the test set (#13). Switch only if the accuracy holds. Quantizing needs two workarounds in onnxruntime's quantizer: skip its shape re-inference (`onnx_quantizer.save_and_reload_model_with_shape_infer`), and pass `extra_options={"DefaultTensorType": onnx.TensorProto.FLOAT}`.
+- **int8 is not used, on the base checkpoint or the fine-tuned one.** On the base checkpoint it halves the time, but the model is unsure about Kannada: most of its yes/no answers sit near 0.5, and int8's rounding flips them (largest change 0.83). Per-channel and weights-only variants did not help. The fine-tuned checkpoint was expected to answer confidently enough to survive the rounding, so it was retested on 2026-11-07 (#97). The comparison used 350 transcripts: the 50 seed sentences and 300 training rows, never the held-out test set. Each decision the call acts on was compared with the fp32 model:
+
+  | | Plain int8 | Per-channel int8 |
+  | --- | --- | --- |
+  | Safety hand-offs fp32 makes that int8 drops | 23 | 23 |
+  | Every acted-on decision the same | 153 of 350 | 162 of 350 |
+  | Department routed the same | 261 of 350 | 269 of 350 |
+
+  In the same run, plain int8 was about 6× faster: the safety step took 0.20 s against 1.29 s (median), and the whole decision 0.62 s against 4.03 s. Both were timed on battery, so only the ratio holds. Losing 23 safety hand-offs rules it out, whatever the speed, so the live call stays on fp32. A faster safety step now needs a smaller model, or quantization-aware fine-tuning, not post-training int8. Quantizing needs two workarounds in onnxruntime's quantizer: skip its shape re-inference (`onnx_quantizer.save_and_reload_model_with_shape_infer`), and pass `extra_options={"DefaultTensorType": onnx.TensorProto.FLOAT}`.
 - **Shorter inputs do not help.** Padding is not the cost, and capping Laya's `max_len` at 192 cut the question text and broke answers.
 - **Screening only the newest turn does not help either.** Measured 2026-11-05 on `kn-ft-v1` with 50 three-turn calls (a seed sentence, then a landmark, then a ward number). The safety step takes 0.43 s on the whole call and 0.27 s on the newest turn, so it saves about 0.15 s. Of the 31 calls still running after turn 1, the answer changed for urgency in 21 at turn 2 and 15 at turn 3, and for out of scope in 8 and 3. Urgency goes on the ticket, so this is not used. Length is not the main cost on calls like these: the whole decision takes 1.17 s at turn 1 and 1.36 s at turn 3. Slow replies on a call come mostly from a busy laptop.
 
@@ -94,6 +103,6 @@ The agent now says a cached "ಸರಿ." ("okay") as soon as a turn ends, before
 
 So first audio is at the 1.5 s target, give or take 0.1 s, and the caller is not left in silence. The answer itself still waits for Laya, which took 2 to 4 s per decision in this run (about 1.1 s in the earlier one; the laptop was busier). What would bring the answer closer:
 
-- **A faster safety step.** It is most of Laya's time. int8 quantization halved the time on the base checkpoint but changed answers; test it again on the fine-tuned checkpoint against the test set.
+- **A faster safety step.** It is most of Laya's time. Post-training int8 is about 6× faster but loses safety hand-offs on both checkpoints ("What was tried"), so this now means quantization-aware fine-tuning or a smaller model.
 - **A shorter `TURN_PAUSE_S`.** Saves up to 0.6 s per turn, at the risk of cutting a caller who pauses mid-sentence into two turns. Tune only against real callers.
 - **The slow first transcript.** Check with Gnani whether a new Prisma session needs a moment before speech; the backend could open the session before the greeting finishes.
