@@ -34,6 +34,7 @@ CONDITIONS = (
     "prisma_8k_ulaw_noise",
     "prisma_8k_loss_noise",
     "prisma_8k_loud_noise",
+    "prisma_phone_call",
 )
 CONDITION_LABEL = {
     "text": "written text",
@@ -42,6 +43,7 @@ CONDITION_LABEL = {
     "prisma_8k_ulaw_noise": "8 kHz, phone codec + noise",
     "prisma_8k_loss_noise": "8 kHz, 3% packets lost + noise",
     "prisma_8k_loud_noise": "8 kHz, noise as loud as the voice",
+    "prisma_phone_call": "real mobile call",
 }
 FLAGS = [name for name, spec in SCHEMA.items() if spec["type"] == "noul"]
 CHOICES = [name for name, spec in SCHEMA.items() if spec["type"] != "noul"]
@@ -374,6 +376,12 @@ def main() -> None:
         metavar="NAME=SOURCE",
         help="a Laya checkpoint with the safety phrases around it; repeatable",
     )
+    parser.add_argument(
+        "--conditions",
+        nargs="+",
+        choices=CONDITIONS[1:],
+        help="score only these spoken conditions; all are scored on the sentences they share",
+    )
     parser.add_argument("--name", help="report file name (default: the set and today's date)")
     parser.add_argument(
         "--note", default="", help="added to the report's opening: how the audio was made"
@@ -401,6 +409,9 @@ def main() -> None:
     if bad:
         raise SystemExit(f"Labels that do not fit the schema: {bad}")
     transcripts = {t["id"]: t for t in read_jsonl(args.transcripts)} if args.transcripts else {}
+    if args.conditions:
+        keep = {"id", "sha256_16", *args.conditions}
+        transcripts = {i: {k: v for k, v in t.items() if k in keep} for i, t in transcripts.items()}
     texts = {r["id"]: r["text"] for r in rows}
     stale = sorted(
         i

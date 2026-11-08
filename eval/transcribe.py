@@ -10,10 +10,13 @@ A failed or empty transcript is not saved, so the next run tries it again.
 Harsher lines (#88), each 8 kHz: `ulaw` through a G.711 mu-law codec with heavy noise, `loss`
 with 3% of 20 ms packets lost and heavy noise, and `loud` with noise as loud as the speech.
 
+`phone` is a real mobile call (#100): the clips phone_call.py cut from the far end's recording,
+in `out/audio_phone/`. A clip the call did not carry is skipped.
+
 `--model prisma-v3.0` transcribes with Prisma v3.0 into `transcripts-prisma-v3.0.jsonl`, so the
 two models are scored on the same audio.
 
-Usage, from backend/: uv run python ../eval/transcribe.py [--only 16k|8k|ulaw|loss|loud]
+Usage, from backend/: uv run python ../eval/transcribe.py [--only 16k|8k|ulaw|loss|loud|phone]
     [--model prisma-v3.0]
 Costs Prisma credits: about 150 clips x each condition x their length.
 """
@@ -38,7 +41,10 @@ NAMES = {
     "ulaw": "prisma_8k_ulaw_noise",
     "loss": "prisma_8k_loss_noise",
     "loud": "prisma_8k_loud_noise",
+    "phone": "prisma_phone_call",
 }
+# Clips cut from a real mobile call's far end by phone_call.py (#100), 8 kHz.
+PHONE_AUDIO = OUT / "audio_phone"
 PACKET_LOSS = 0.03
 MODELS = ("prisma-v2.5", "prisma-v3.0")
 TRAILING_SILENCE_S = 1.5  # lets Prisma's VAD close the last segment
@@ -119,6 +125,10 @@ def conditions(path: Path, wanted: list[str]) -> dict[str, tuple[bytes, int]]:
         out["prisma_8k_loss_noise"] = (to_pcm16(lost), 8000)
     if "prisma_8k_loud_noise" in wanted:
         out["prisma_8k_loud_noise"] = (to_pcm16(phone_line(samples, rate, "loud", seed)), 8000)
+    # Only the clips the call carried: one lost on the line is left out, not retried.
+    if "prisma_phone_call" in wanted and (called := PHONE_AUDIO / path.name).exists():
+        phone, phone_rate = read_wav(called)
+        out["prisma_phone_call"] = (to_pcm16(phone), phone_rate)
     return out
 
 
