@@ -79,3 +79,5 @@ The checkpoint did not replace `kn-ft-v1`: it caught more officer requests but m
 ## Third fine-tune (#99)
 
 `kn-ft-v3` keeps `kn-ft-v1`'s recipe (dataset tag `v1.0`, 2 epochs, seed 0, effective batch 64) and adds only the 356 `v2.0` rows labelled `wants_human` (112 of them hazards), with `--add-rows v2.0:wants_human`. Their ids are prefixed `v2.0:`, so they cannot clash with v1's. The aim is to keep v2's officer-request gain without the drain and road changes that cost it hazards. The recipe and the switch rule were fixed in #99 before training, and it is scored once by `eval/compare.py`.
+
+**Result: KEEP `kn-ft-v1`** ([`eval/reports/switch-kn-ft-v3.md`](../eval/reports/switch-kn-ft-v3.md)). v3 caught more officer requests (4 of 7 on both lines, against 3 and 2) and raised fewer false hazards (precision 0.71 against 0.58), but caught 27 of 34 hazards at 16 kHz against 30, and found fewer locations and repeat complaints. It is not tuned further against the test set.

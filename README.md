@@ -169,6 +169,7 @@ The rule, in [`eval/compare.py`](eval/compare.py): **no fall in safety recall, a
 | Challenger | What it improved | Why it was rejected |
 | --- | --- | --- |
 | Second fine-tune `kn-ft-v2` | Wants a human 3 → **5 of 7**, urgency accuracy 0.49 → 0.57 | Caught 28 of 34 hazards against 30 ([report](eval/reports/switch-kn-ft-v2.md)) |
+| Third fine-tune `kn-ft-v3`, v1's data plus v2's officer requests | Wants a human 3 → **4 of 7**, hazard precision 0.58 → 0.71 | Caught 27 of 34 hazards against 30 ([report](eval/reports/switch-kn-ft-v3.md)) |
 | Fixed safety phrases in code | Strong on generated rows | Caught no extra hazards on the test set ([note](docs/decisions/safety-phrases.md)) |
 | Gnani Prisma v3.0 | Fewer false alarms, 4 of 7 officer requests | Fewer real hazards caught on every line ([report](eval/reports/switch-prisma-v3.0.md)) |
 
@@ -276,7 +277,7 @@ A 10% hand check of the training set found the labels right in 97% of rows, but 
 ## Limitations and next steps
 
 - **Better Kannada training data.** Native speakers writing or fixing the sentences is the biggest remaining lever. A regenerated set did not fix it.
-- **Keep the officer-request gain** from `kn-ft-v2` without losing hazard recall.
+- **Keep the officer-request gain without losing hazards.** Two fine-tunes raised officer requests (to 5 and 4 of 7), and both caught fewer hazards, so neither went live. Adding officer-request rows alone (`kn-ft-v3`) was not enough.
 - **A faster safety step.** We tested int8 on the fine-tuned model: about 6× faster, but it dropped 23 of the live model's safety hand-offs on 350 non-test sentences, so we kept fp32 ([details](docs/decisions/laya-latency.md#what-was-tried)). Next is quantization-aware fine-tuning or a smaller model.
 - **Real voices and a real phone line.** The test audio is synthetic speech, so the numbers measure the line and Prisma, not real callers. Next is real voices reading the test set, and a SIP line through LiveKit.
 - **Labels checked by a non-native reader.** The labels and the test set were checked against written rules, not by a native Kannada speaker.

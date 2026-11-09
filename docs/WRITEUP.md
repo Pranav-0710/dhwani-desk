@@ -82,6 +82,8 @@ Held-out test set, spoken, Prisma at 16 kHz ([`eval/reports/test-kn-ft-v1-timbre
 
 On the noisy 8 kHz line, v2 caught 26 of 34 hazards against v1's 29. The fix for false hazards did not work, and it cost real ones. The test set is small, so a sentence or two can move these scores, but a missed emergency is the error we least accept. We did not tune v2 further against this test set, because that would stop it being a fair test.
 
+**Nor did a third.** `kn-ft-v3` kept v1's data and recipe and added only v2's 356 rows where the caller asks for an officer, to keep v2's gain without the changes that cost it hazards. The recipe and the same rule were fixed before training (#99). It raised officer requests to 4 of 7 on both lines (v1: 3 and 2) and hazard precision from 0.58 to 0.71, but caught 27 of 34 hazards at 16 kHz against v1's 30, so `kn-ft-v1` stays live ([`eval/reports/switch-kn-ft-v3.md`](../eval/reports/switch-kn-ft-v3.md)). Fewer false alarms came with fewer real hazards, the same trade v2 made.
+
 We also tried fixed phrases in code that always count as a hazard or a request for an officer ([`docs/decisions/safety-phrases.md`](decisions/safety-phrases.md)). They did well on generated rows but caught no extra hazards on the test set, so the same rule kept them out of live calls.
 
 **Harsher phone lines, and Prisma v3.0.** We also played the test audio through three harsher 8 kHz lines: a G.711 phone codec, 3% of 20 ms packets lost, and noise as loud as the voice (about 0 dB). Each one also had heavy noise. We transcribed every line with Prisma v2.5 and with the newer Prisma v3.0, and fixed the same switch rule before any v3.0 test transcript existed ([`eval/reports/switch-prisma-v3.0.md`](../eval/reports/switch-prisma-v3.0.md)). The decider was `kn-ft-v1` in every case.
@@ -97,13 +99,13 @@ We also tried fixed phrases in code that always count as a hazard or a request f
 - On Prisma v2.5, the codec and lost packets cost almost nothing. Noise as loud as the voice is where it breaks: 5 more hazards missed and 0.04 lower department F1.
 - Prisma v3.0 caught more officer requests (4 of 7 against 3 of 7) and raised fewer false hazards. It missed 4 more real hazards, though, and routed departments worse, so the rule kept v2.5. Our decider was fine-tuned and tested on v2.5-style transcripts, so this says v3.0 does not suit *our* model as it stands. It does not say v3.0 transcribes Kannada worse.
 
-The test set has now been used to compare four options, so its numbers are a little less clean than a test seen once.
+The test set has now been used to compare five options, so its numbers are a little less clean than a test seen once.
 
 **Latency** ([`docs/decisions/laya-latency.md`](decisions/laya-latency.md)): the agent says "ಸರಿ" ("okay") as soon as the caller finishes, about 1.5 s after their last word (the target is 1.5 s). The answer itself follows 3.7 to 6 s after the caller stopped on a busy laptop, about 2.8 s on a quieter run: Prisma's transcript (about 0.75 s), a 0.6 s pause to let the caller finish, Laya (1 to 4 s depending on load, mostly the safety step) and Timbre (about 0.3 s). On the first turn of a call, Prisma's first transcript sometimes took about 12 s.
 
 ## What we would do next
 
-- Train on better Kannada: have native speakers write or fix the training sentences. Generating a new set did not fix this: in our hand check, by a non-native reader, only 35% of the second set's sentences read as natural. The officer-request gain in `kn-ft-v2` is worth keeping, so the next run should add those rows without losing hazard recall.
+- Train on better Kannada: have native speakers write or fix the training sentences. Generating a new set did not fix this: in our hand check, by a non-native reader, only 35% of the second set's sentences read as natural. Two fine-tunes raised officer requests and both lost hazards, including one that only added officer-request rows (`kn-ft-v3`), so the trade sits in the data, not in the mix of rows.
 - Make the safety step faster, so the answer follows the acknowledgement sooner. Post-training int8 is not the way: on the fine-tuned model it was about 6× faster but dropped 23 of the live model's safety hand-offs on 350 non-test sentences ([`docs/decisions/laya-latency.md`](decisions/laya-latency.md)). Quantization-aware fine-tuning or a smaller model is next.
 - Test with real voices reading the test set, and on a real phone line (LiveKit).
 
