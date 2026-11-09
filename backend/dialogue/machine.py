@@ -2,7 +2,9 @@
 
 greet → listen → decide on everything the caller has said so far → one of:
 - hand off to an officer (safety risk, emergency, caller asks for a person, caller distressed
-  or abusive, the complaint still cannot be routed, or the decider failed)
+  or abusive, the complaint still cannot be routed, or the decider failed). A safety risk or an
+  emergency also files a ticket marked emergency at once, so a caller who hangs up after the
+  safety line still leaves one; the full decision fills it in when it arrives
 - redirect (not a civic complaint) and close, with no ticket
 - ask for what is missing (the problem, the location, the ward) and listen again
 - read back the ticket number and close
@@ -104,7 +106,8 @@ class Reply:
 
 
 class TicketDesk(Protocol):
-    """Files a ticket and returns its number (tickets.store.TicketStore in the app)."""
+    """Files a call's ticket and returns its number (tickets.store.TicketStore in the app).
+    A call has one ticket: filing again for the same call updates it and keeps its number."""
 
     def file(self, request: TicketRequest) -> str: ...
 
@@ -114,11 +117,14 @@ class CountingDesk:
 
     def __init__(self, start: int = 1001) -> None:
         self._numbers = count(start)
-        self.filed: list[TicketRequest] = []
+        self._by_call: dict[str, str] = {}
+        self.filed: list[TicketRequest] = []  # every filing, updates included
 
     def file(self, request: TicketRequest) -> str:
         self.filed.append(request)
-        return str(next(self._numbers))
+        if request.call_id not in self._by_call:
+            self._by_call[request.call_id] = str(next(self._numbers))
+        return self._by_call[request.call_id]
 
 
 @dataclass
@@ -139,6 +145,8 @@ class Dialogue:
     _location_asks: int = 0
     _ward_asked: bool = False
     _apologised: bool = False
+    # A safety risk or an emergency was heard: the call's ticket stays marked emergency.
+    _emergency: bool = False
     # How many turns had been said when an officer last handed the call back.
     _handed_back_at: int | None = None
     # How many turns had been said when a decision was last remembered.
@@ -266,7 +274,8 @@ class Dialogue:
         if self.state is not State.HANDED_OFF:
             return self._reply(())
         self._remember(decision)
-        return self._reply((), reason=self.reason, decision=decision)
+        ticket = self._file_emergency(decision) if self._emergency else None
+        return self._reply((), reason=self.reason, ticket=ticket, decision=decision)
 
     def respond(self, decision: Decision) -> Reply:
         """The agent's answer to a decision on everything the caller has said so far."""
@@ -337,34 +346,49 @@ class Dialogue:
         return ()
 
     def _close_with_ticket(self, opening: tuple[str, ...], decision: Decision) -> Reply:
-        department = self.slots.department
-        assert department is not None
-        repeat = decision.repeat_complaint > REPEAT_COMPLAINT
+        ticket = self._file(decision)
+        keys = (
+            *opening,
+            *(("repeat_noted",) if ticket.repeat_complaint else ()),
+            "read_back_ward" if self.slots.ward else "read_back",
+            "closing",
+        )
+        self.state = State.CLOSED
+        return self._reply(keys, reason="ticket", ticket=ticket, decision=decision)
+
+    def _file_emergency(self, answers: Decision | Screening) -> Ticket | None:
+        """The ticket for a caller in danger, from what is known so far. A failed write is
+        logged and never stops the hand-off: the caller must still hear the safety line."""
+        self._emergency = True
+        try:
+            return self._file(answers)
+        except Exception:
+            logger.exception("Filing the emergency ticket failed; handing off regardless")
+            return None
+
+    def _file(self, answers: Decision | Screening) -> Ticket:
+        """File (or, for a call that has one, update) the call's ticket."""
+        repeat = isinstance(answers, Decision) and answers.repeat_complaint > REPEAT_COMPLAINT
         request = TicketRequest(
             call_id=self.call_id,
-            department=department,
+            department=self.slots.department or "unknown",
             ward=self.slots.ward or "unknown",
-            urgency=decision.urgency,
+            urgency="emergency" if self._emergency else answers.urgency,
             repeat_complaint=repeat,
-            location_text=" ".join(self.location_turns),
-            decision=decision,
+            # Before any place is known, an emergency ticket keeps everything the caller
+            # said: it is all the field team has to go on.
+            location_text=" ".join(self.location_turns)
+            or (self.transcript if self._emergency else ""),
+            decision=answers,
             decider_revision=self.decider.revision,
         )
-        ticket = Ticket(
+        return Ticket(
             number=self.desk.file(request),
             department=request.department,
             ward=request.ward,
             urgency=request.urgency,
             repeat_complaint=repeat,
         )
-        keys = (
-            *opening,
-            *(("repeat_noted",) if repeat else ()),
-            "read_back_ward" if self.slots.ward else "read_back",
-            "closing",
-        )
-        self.state = State.CLOSED
-        return self._reply(keys, reason="ticket", ticket=ticket, decision=decision)
 
     def _end(
         self,
@@ -375,7 +399,14 @@ class Dialogue:
         screening: Screening | None = None,
     ) -> Reply:
         self.state, self.reason = state, reason
-        return self._reply(keys, reason=reason, decision=decision, screening=screening)
+        ticket = None
+        if reason == "safety":
+            answers = decision or screening
+            assert answers is not None
+            ticket = self._file_emergency(answers)
+        return self._reply(
+            keys, reason=reason, ticket=ticket, decision=decision, screening=screening
+        )
 
     def _reply(
         self,
@@ -388,7 +419,7 @@ class Dialogue:
         values = {}
         if ticket:
             values = {
-                "department": self.templates.departments[ticket.department],
+                "department": self.templates.departments.get(ticket.department, ""),
                 "ward": self.templates.wards.get(ticket.ward, ""),
                 # Digit by digit, so it is read as "1 0 0 4", easy to write down.
                 "ticket": " ".join(ticket.number),

@@ -8,6 +8,7 @@ from fakes import NOTHING, ROADS, ROADS_IN_W04, ScriptedDecider, isolated_settin
 from fastapi.testclient import TestClient
 
 import app as app_module
+from dialogue.decision import Screening
 from dialogue.machine import CountingDesk, Dialogue
 from dialogue.templates import load_templates
 from tickets.masking import mask_personal_ids
@@ -77,12 +78,12 @@ def test_personal_numbers_are_masked(text: str, personal_id: float, expected: st
 def test_tickets_are_numbered_from_1001_and_survive_a_restart(tmp_path) -> None:
     path = tmp_path / "dhwani.db"
     store = TicketStore(path)
-    assert [store.file(request()), store.file(request(ward="w07"))] == ["1001", "1002"]
+    assert [store.file(request()), store.file(request(call_id="call-2"))] == ["1001", "1002"]
     store.close()
 
     reopened = TicketStore(path)
     assert [t["number"] for t in reopened.tickets()] == ["1002", "1001"]  # newest first
-    assert reopened.file(request()) == "1003"
+    assert reopened.file(request(call_id="call-3")) == "1003"
     ticket = reopened.ticket(1001)
     assert ticket is not None
     assert (ticket["department"], ticket["ward"], ticket["status"]) == ("roads", "w04", "open")
@@ -161,7 +162,7 @@ def console_token(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_the_console_api_lists_and_finds_tickets(ticket_store, console_token) -> None:
     ticket_store.file(request())
-    ticket_store.file(request(department="water"))
+    ticket_store.file(request(call_id="call-2", department="water"))
     with TestClient(app_module.app, headers=CONSOLE) as client:
         listed = client.get("/api/tickets", params={"limit": 1}).json()
         assert [t["number"] for t in listed] == ["1002"]
@@ -301,3 +302,48 @@ def test_a_corrected_ward_is_filed_with_the_words_that_corrected_it() -> None:
     (filed,) = desk.filed
     assert filed.ward == "w04"
     assert filed.location_text == "ಕೆರೆಕೋಡಿ ಬಸ್ ಸ್ಟ್ಯಾಂಡ್ ಹತ್ತಿರ ಕ್ಷಮಿಸಿ, ಗಾಂಧಿನಗರ, ರೋಡ್ ಹಾಳಾಗಿದೆ"
+
+
+def test_filing_again_for_a_call_updates_its_one_ticket(ticket_store) -> None:
+    # An emergency ticket filled in by the full decision, or a call closed after a hand-back.
+    first = ticket_store.file(request(department="unknown", ward="unknown", urgency="emergency"))
+    created = ticket_store.ticket(int(first))["created_at"]
+    again = ticket_store.file(request(urgency="emergency"))
+    other_call = ticket_store.file(request(call_id="call-2"))
+
+    assert (first, again, other_call) == ("1001", "1001", "1002")
+    ticket = ticket_store.ticket(1001)
+    assert (ticket["department"], ticket["ward"], ticket["urgency"]) == (
+        "roads",
+        "w04",
+        "emergency",
+    )
+    assert (ticket["created_at"], ticket["status"]) == (created, "open")
+    assert len(ticket_store.tickets()) == 2
+
+
+def test_a_ticket_filed_on_the_safety_step_is_masked_as_if_a_number_was_said(
+    ticket_store,
+) -> None:
+    # The safety step does not ask about personal numbers, so short runs go too.
+    screening = Screening(safety_hazard=0.9, urgency="soon", wants_human=0.1, out_of_scope=0.1)
+    number = ticket_store.file(request(location_text="ಖಾತೆ 4521 ಹತ್ತಿರ", decision=screening))
+    ticket = ticket_store.ticket(int(number))
+    assert ticket["location_text"] == "ಖಾತೆ XXXX ಹತ್ತಿರ"
+    assert ticket["decision"] == dataclasses.asdict(screening)
+
+
+def test_every_decision_acted_on_is_kept_with_its_probabilities(ticket_store) -> None:
+    screening = Screening(safety_hazard=0.9, urgency="soon", wants_human=0.1, out_of_scope=0.1)
+    ticket_store.record_decision("call-1", 1, "safety", screening, "laya:repo@abc")
+    ticket_store.record_decision("call-1", 1, "safety", ROADS_IN_W04, "laya:repo@abc")
+    ticket_store.record_decision("call-2", 1, "ask_location", ROADS, "laya:repo@abc")
+
+    kept = ticket_store.decisions("call-1")
+    assert [(d["turn"], d["step"], d["outcome"]) for d in kept] == [
+        (1, "screening", "safety"),
+        (1, "decision", "safety"),
+    ]
+    assert kept[0]["answers"] == dataclasses.asdict(screening)
+    assert kept[1]["answers"]["department_confidence"] == 0.9
+    assert {d["decider_revision"] for d in kept} == {"laya:repo@abc"}

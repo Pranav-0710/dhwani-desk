@@ -12,14 +12,14 @@ City helplines get thousands of calls a day about water, drains, garbage, roads 
 A caller rings and just talks, in Kannada. **Gnani Prisma** transcribes the call, a fine-tuned **Laya** model decides what the caller needs, and **Gnani Timbre** speaks the reply.
 
 - **Routine complaints** end with a ticket number, routed to one of seven departments and the right ward.
-- **Danger goes to a person first.** Laya's safety questions run before anything else, and a hazard hands the call to an officer at once.
+- **Danger goes to a person first.** Laya's safety questions run before anything else, and a hazard hands the call to an officer at once, with a ticket marked emergency.
 - **Officers stay in control.** A live console shows every call with each decision's confidence. An officer can take over and type in Kannada, and it is spoken in the agent's voice.
 
 ## Why it is different
 
 - **No LLM in the call.** Replies come from fixed Kannada templates, so the agent never invents an answer.
 - **Every decision runs locally** on a laptop CPU: ₹0 per decision, and only speech goes to the Gnani APIs.
-- **Auditable.** Every ticket stores each answer's probability and the exact model revision that made it.
+- **Auditable.** Every decision the agent acts on is stored with each answer's probability and the exact model revision that made it.
 - **Private by design.** Spoken ID numbers are masked before storage, transcripts are deleted after 7 days, and all data is synthetic.
 
 ## Results (held-out test set: 150 calls never seen in training)
@@ -34,6 +34,6 @@ The agent says "ಸರಿ" ("okay") about 1.5 s after the caller stops. Every mo
 
 ## Built properly
 
-FastAPI backend, React console, 618 tests in CI, Laya fine-tuned on Kaggle and pinned to a Hugging Face tag, and Docker Compose to run it. Synthetic data only; the demo city, *Nagara Seva, City Corporation of Hosapura*, is fictional.
+FastAPI backend, React console, 629 tests in CI, Laya fine-tuned on Kaggle and pinned to a Hugging Face tag, and Docker Compose to run it. Synthetic data only; the demo city, *Nagara Seva, City Corporation of Hosapura*, is fictional.
 
 **Next:** native-speaker training data, real voices, and a SIP phone line.

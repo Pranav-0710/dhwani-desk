@@ -364,6 +364,10 @@ def test_a_whole_call_ends_with_a_ticket(
     assert (ticket["department"], ticket["ward"]) == ("roads", "w04")
     assert ticket["decider_revision"] == "scripted"
     assert ticket_store.transcript(ticket["call_id"]) == ["ರಸ್ತೆ"]
+    # The decision behind the read-back is kept on its own too, with every probability.
+    (kept,) = ticket_store.decisions(ticket["call_id"])
+    assert (kept["turn"], kept["step"], kept["outcome"]) == (1, "decision", "ticket")
+    assert kept["answers"] == dataclasses.asdict(ROADS_IN_W04)
 
 
 def test_the_ticket_number_is_not_cut_off_by_a_barge_in(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -548,6 +552,49 @@ def test_the_turn_behind_a_safety_hand_off_is_kept_if_the_caller_hangs_up(
     ((call_id, _, text, personal_id),) = recorded
     assert (text, personal_id) == ("ರಸ್ತೆ", 1.0)  # masked as if it held a personal number
     assert ticket_store.transcript(call_id) == ["ರಸ್ತೆ"]
+    # The emergency ticket was filed with the hand-off, from the safety step alone.
+    (ticket,) = ticket_store.tickets()
+    assert (ticket["call_id"], ticket["urgency"]) == (call_id, "emergency")
+    assert (ticket["department"], ticket["ward"]) == ("unknown", "unknown")
+    assert ticket["location_text"] == "ರಸ್ತೆ"
+    assert ticket["decision"]["safety_hazard"] == 0.9
+    assert [(d["step"], d["outcome"]) for d in ticket_store.decisions(call_id)] == [
+        ("screening", "safety")
+    ]
+
+
+def test_the_full_decision_fills_in_the_emergency_ticket_and_both_are_kept(
+    monkeypatch: pytest.MonkeyPatch, ticket_store: TicketStore
+) -> None:
+    danger = dataclasses.replace(ROADS_IN_W04, safety_hazard=0.9)
+    use_dialogue_fakes(monkeypatch, FakeTts(), ScriptedDecider(danger))
+
+    def both_decisions_kept(sent: list) -> bool:
+        tickets = ticket_store.tickets()
+        return bool(tickets) and len(ticket_store.decisions(tickets[0]["call_id"])) >= 2
+
+    browser = ScriptedBrowser([bytes(1024)], leave_when=both_decisions_kept)
+
+    asyncio.run(app_module.call(browser))
+
+    events = [m for m in browser.sent if isinstance(m, dict) and m["type"] == "dialogue"]
+    _, hand_off, filled_in = events
+    assert (hand_off["keys"], hand_off["reason"]) == (["safety"], "safety")
+    assert hand_off["ticket"]["urgency"] == "emergency"
+    assert filled_in["keys"] == []
+    assert filled_in["ticket"]["number"] == hand_off["ticket"]["number"]
+    (ticket,) = ticket_store.tickets()
+    assert ticket["number"] == hand_off["ticket"]["number"]
+    assert (ticket["department"], ticket["ward"], ticket["urgency"]) == (
+        "roads",
+        "w04",
+        "emergency",
+    )
+    assert ticket["decision"] == dataclasses.asdict(danger)
+    assert [(d["step"], d["outcome"]) for d in ticket_store.decisions(ticket["call_id"])] == [
+        ("screening", "safety"),
+        ("decision", "safety"),
+    ]
 
 
 @pytest.mark.parametrize("danger", [False, True], ids=["after_hold_on", "after_hand_off"])

@@ -34,6 +34,8 @@ export function wardLabel(id: string | null | undefined): string {
   return ward ? `${ward.nameEn} (${id})` : id
 }
 
+/** A ticket filed for a caller in danger before the department is known has `unknown`. */
 export function departmentLabel(id: string | null | undefined): string {
-  return id ? (DEPARTMENTS[id] ?? id) : 'Department not yet known'
+  if (!id || id === 'unknown') return 'Department not yet known'
+  return DEPARTMENTS[id] ?? id
 }

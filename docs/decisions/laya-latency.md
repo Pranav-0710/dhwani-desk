@@ -92,16 +92,18 @@ Then tag that commit, set `LAYA_CHECKPOINT_REVISION` to the tag and `DECIDER=lay
 
 Measured on 2026-11-01 with `scripts.call_smoke` against the fine-tuned checkpoint (`kn-ft-v1`, `DECIDER=laya`, `LAYA_THREADS=8`) on the laptop, CPU about 30% busy with other apps. Four calls, each a garbage complaint and then a place ("ಕಸದ ಗಾಡಿ ಒಂದು ವಾರದಿಂದ ಬಂದಿಲ್ಲ", "ಗಾಂಧಿನಗರ ಸರ್ಕಾರಿ ಆಸ್ಪತ್ರೆ ಹತ್ತಿರ"). The caller is a Timbre voice; the time is taken from the end of the caller's words.
 
-| Turn | First agent audio after the caller stopped |
-| --- | --- |
-| Second turn (the ward, then the ticket read-back) | 2.74, 2.82, 3.00, 2.99 s |
-| First turn ("one moment", then the question) | 2.2 s in one call; 12.2 to 12.7 s in the other three |
+| Turn | What was timed | After the caller stopped |
+| --- | --- | --- |
+| Second turn (the ward, then the ticket read-back) | the ticket read-back starting | 2.74, 2.82, 3.00, 2.99 s |
+| First turn ("one moment", then the question) | "one moment" starting | 2.2 s in one call; 12.2 to 12.7 s in the other three |
+
+On the second turn the script's timer at the time caught only the answer, not the "one moment" said before it (fixed in #112: `call_smoke` now prints both, the first agent audio and the answer's start).
 
 Where the time goes on the second turn: Prisma returns the transcript about 0.75 s after the words end, the turn collector waits `TURN_PAUSE_S` = 0.6 s, Laya's safety step and decision take about 1.1 s, and Timbre starts the ticket line in about 0.3 s.
 
 On the first turn, three calls out of four waited about 12 s for Prisma's transcript of the caller's first line; the fourth got it in about 3 s. In those calls the caller started speaking within a second of the session opening. Later turns never waited like this.
 
-Without an acknowledgement, the caller heard nothing for about 2.8 s after a normal turn, against a 1.5 s target.
+Without an acknowledgement, the answer to a normal turn started about 2.8 s after the caller stopped, against a 1.5 s target. "One moment" is said once a decision has run 0.3 s, so the caller heard that a little earlier: about 2.5 s, from the parts above (0.75 + 0.6 + the safety step's 0.5 + 0.3 + Timbre's 0.3), not measured.
 
 ### With an acknowledgement (`acknowledge_turns`)
 
@@ -109,8 +111,10 @@ The agent now says a cached "ಸರಿ." ("okay") as soon as a turn ends, before
 
 | | After the caller stopped |
 | --- | --- |
-| First agent audio ("ಸರಿ.") | 1.51, 1.60, 1.63, 2.03 s |
+| First agent audio ("ಸರಿ."), on the caller's first turn | 1.51, 1.60, 1.63, 2.03 s |
 | The answer itself (question or ticket read-back) | 3.7 to 6.0 s |
+
+The script's old timer caught "ಸರಿ." on the first turn only; on later turns it timed the answer. "ಸರಿ." is said the moment a turn ends, before anything is decided, so a later turn's should come as fast.
 
 So first audio is at the 1.5 s target, give or take 0.1 s, and the caller is not left in silence. The answer itself still waits for Laya, which took 2 to 4 s per decision in this run (about 1.1 s in the earlier one; the laptop was busier). What would bring the answer closer:
 

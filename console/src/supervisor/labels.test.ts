@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import schemaJson from '../../../data/decision_schema.json?raw'
 import wardsJson from '../../../data/wards.json?raw'
-import { DEPARTMENTS, URGENCY_LEVELS, WARDS, wardLabel } from './labels'
+import { DEPARTMENTS, URGENCY_LEVELS, WARDS, departmentLabel, wardLabel } from './labels'
 
 describe('labels', () => {
   it('names every ward in data/wards.json, and no others', () => {
@@ -22,5 +22,11 @@ describe('labels', () => {
     expect(wardLabel('unknown')).toBe('Unknown ward')
     expect(wardLabel(null)).toBe('Unknown ward')
     expect(wardLabel('w04')).toBe('Gandhinagar (w04)')
+  })
+
+  it('says a department is not yet known, as on an emergency ticket filed at once', () => {
+    expect(departmentLabel('unknown')).toBe('Department not yet known')
+    expect(departmentLabel(null)).toBe('Department not yet known')
+    expect(departmentLabel('roads')).toBe('Roads')
   })
 })

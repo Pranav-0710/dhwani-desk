@@ -14,7 +14,7 @@
 
 </div>
 
-A caller rings the city helpline and just talks, in Kannada, on an ordinary phone line. **Gnani Prisma** transcribes the call, a fine-tuned **Laya** model decides what the caller needs, and **Gnani Timbre** speaks the reply. Routine complaints end with a ticket number. A fallen live wire or a child near an open drain goes straight to an officer, before any routine question. A supervisor console shows every live call with each decision's confidence, and an officer can take over and speak in the agent's voice.
+A caller rings the city helpline and just talks, in Kannada, on an ordinary phone line. **Gnani Prisma** transcribes the call, a fine-tuned **Laya** model decides what the caller needs, and **Gnani Timbre** speaks the reply. Routine complaints end with a ticket number. A fallen live wire or a child near an open drain goes straight to an officer, before any routine question, with a ticket marked emergency. A supervisor console shows every live call with each decision's confidence, and an officer can take over and speak in the agent's voice.
 
 Every decision runs locally on a laptop CPU. There is no LLM in the call: replies come from fixed Kannada templates, so the agent never invents an answer.
 
@@ -32,7 +32,7 @@ Built for Gnani AI's **Great Indian AI Internship Challenge**.
 | **Phone-line cost** | Department macro-F1 drops by only **0.01** on an 8 kHz noisy line |
 | **First response** | The agent says "ಸರಿ" ("okay") about **1.5 s** after the caller stops |
 | **Cost per decision** | **₹0**: Laya runs on CPU, so only speech goes to the Gnani APIs |
-| **Tests** | **618** backend and console tests run in CI on every pull request, plus 123 for the training code and 17 for the evaluation harness |
+| **Tests** | **629** backend and console tests run in CI on every pull request, plus 123 for the training code and 17 for the evaluation harness |
 
 ## Contents
 
@@ -154,7 +154,7 @@ Held-out test set: 150 calls written separately from the training data and never
 | Wants a human, recall | ≥ 0.90 | 0.43 | 0.14 | **0.43** |
 | Macro-F1 drop, 8 kHz + noise | reported | 0.01 | 0.00 | **0.01** |
 
-**Read honestly:** fine-tuning made Laya usable for Kannada, but it misses all three targets. Safety recall is close, and the model leans towards caution: some ordinary drain and pothole complaints reach an officer instead of getting a ticket. We accept that over a missed emergency. "Wants a human" is the weakest result, because few training rows ask for a person.
+**Read honestly:** fine-tuning made Laya usable for Kannada, but it misses all three targets. Safety recall is close, and the model leans towards caution: some ordinary drain and pothole complaints reach an officer, on an emergency ticket, instead of getting a routine one. We accept that over a missed emergency. "Wants a human" is the weakest result, because few training rows ask for a person.
 
 ### On worse and worse phone lines
 
@@ -183,6 +183,7 @@ The agent says "ಸರಿ" ("okay") about 1.5 s after the caller's last word, fr
 
 **Safety first**
 - The safety questions run before anything else, and a hazard ends the routine flow at once.
+- A hazard files a ticket marked emergency the moment the call is handed off, so it is kept even if the caller hangs up straight after the safety line.
 - If a decision or a ticket write fails, the call goes to an officer instead of going silent.
 - Replies are fixed templates: nothing the agent says is generated.
 
@@ -192,7 +193,7 @@ The agent says "ಸರಿ" ("okay") about 1.5 s after the caller's last word, fr
 - Transcripts are deleted after 7 days, and the caller's location words are blanked after 30.
 
 **Audit**
-- Every ticket stores the decision behind it, each answer's probability, and the exact checkpoint revision.
+- Every decision the agent acts on is stored with each answer's probability and the exact checkpoint revision, whether the call ends in a ticket, a hand-off or a redirect.
 - The checkpoint is pinned to a Hugging Face tag (`kn-ft-v1`) and is never "latest".
 
 **Safe to demo in public** ([security model](docs/decisions/security-model.md))

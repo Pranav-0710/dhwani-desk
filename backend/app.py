@@ -575,15 +575,50 @@ async def _converse(
                 if timer:
                     timer.cancel()
 
+        def write_turn(personal_id: float) -> None:
+            store.record_turn(
+                dialogue.call_id, len(dialogue.turns), dialogue.turns[-1], personal_id
+            )
+
         async def record_turn(personal_id: float) -> None:
             # Off the event loop: a disk write must not stall the audio of other calls.
-            await asyncio.to_thread(
-                store.record_turn,
-                dialogue.call_id,
-                len(dialogue.turns),
-                dialogue.turns[-1],
-                personal_id,
-            )
+            await asyncio.to_thread(write_turn, personal_id)
+
+        def keep(reply: Reply) -> Reply:
+            """Store the decision behind a reply, with every probability, for audit. Called in
+            the same worker thread that made the reply, so a hang-up that cancels the call
+            cannot lose it. A failed write is logged and never changes what the caller hears."""
+            answers = reply.decision or reply.screening
+            if answers is not None:
+                outcome = reply.reason or (reply.keys[-1] if reply.keys else "listening")
+                try:
+                    store.record_decision(
+                        dialogue.call_id,
+                        len(dialogue.turns),
+                        outcome,
+                        answers,
+                        dialogue.decider.revision,
+                    )
+                except Exception:
+                    logger.exception("Storing a decision failed")
+            return reply
+
+        def hand_off_at_once(first: Screening, new_turn: bool) -> Reply | None:
+            """The hand-off the safety step calls for, or None. Run in a thread, with what must
+            outlast the call written in the same go: the turn (`new_turn`: not stored yet), and
+            for a caller in danger the emergency ticket, which `screened` files. A caller told
+            to call 112 may hang up at once, and a write already running here still finishes.
+            A failed write is logged, never allowed to silence the hand-off."""
+            handed_off = dialogue.screened(first)
+            if handed_off is None:
+                return None
+            if new_turn:
+                try:
+                    # Masked as if it held a personal number: no decision says otherwise yet.
+                    write_turn(1.0)
+                except Exception:
+                    logger.exception("Storing the turn behind a safety hand-off failed")
+            return keep(handed_off)
 
         async def decide(new_turn: bool) -> None:
             """Decide on the whole call and answer, in the steps `Dialogue.turn` takes in one
@@ -617,16 +652,13 @@ async def _converse(
             except Exception:
                 await hand_off_on_failure()
                 return
-            if first is not None and (handed_off := dialogue.screened(first)) is not None:
-                # Safety first: the turn is stored and the hand-off said before the rest is
-                # decided, since a caller told to call 112 may hang up at once. A failed write
-                # is logged, never allowed to silence the hand-off. Masked as if it held a
-                # personal number, as no decision says otherwise yet. The rest follows for the
-                # officer as a `dialogue` event with no lines.
-                try:
-                    await store_turn(1.0)
-                except Exception:
-                    logger.exception("Storing the turn behind a safety hand-off failed")
+            handed_off = None
+            if first is not None:
+                handed_off = await asyncio.to_thread(hand_off_at_once, first, new_turn)
+            if handed_off is not None:
+                # Safety first: the hand-off is said before the rest is decided. The rest
+                # follows for the officer as a `dialogue` event with no lines, and fills in the
+                # emergency ticket (in a thread: a SQLite write).
                 await answer(handed_off)
                 try:
                     screening = await screen_whole_call(first)
@@ -636,7 +668,7 @@ async def _converse(
                 except Exception:
                     logger.exception("Completing a decision after a hand-off failed")
                     return
-                await answer(dialogue.complete(decision))
+                await answer(await asyncio.to_thread(lambda: keep(dialogue.complete(decision))))
                 return
             try:
                 screening = await screen_whole_call(first)
@@ -645,10 +677,11 @@ async def _converse(
                 await hand_off_on_failure()
                 return
             await store_turn(decision.contains_personal_id)
-            # In a thread: a reply that closes the call files the ticket, a SQLite write that can
-            # wait on the store's lock (a purge, another call's turn) and would stall every call.
+            # In a thread: a reply that closes the call files the ticket, and every reply keeps
+            # its decision: SQLite writes that can wait on the store's lock (a purge, another
+            # call's turn) and would stall every call.
             # Only this task changes the dialogue, so nothing else races it meanwhile.
-            await answer(await asyncio.to_thread(dialogue.respond, decision))
+            await answer(await asyncio.to_thread(lambda: keep(dialogue.respond(decision))))
 
         async def obey(command: OfficerCommand) -> None:
             if command.done.done():
