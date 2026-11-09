@@ -48,6 +48,7 @@ Timed on one long fixture (all eight questions in one run), before the split:
 | **ONNX fp32, 8 threads** | **4.5 s** | yes |
 | ONNX int8 (dynamic quantization) | 2.0–2.7 s | **no: 58 of 80 answers match** |
 | ONNX int8 on `kn-ft-v1`, plain or per-channel (#97) | about 6× faster | **no: drops 23 of the fp32 model's safety hand-offs in 350 transcripts** |
+| ONNX int8 on part of `kn-ft-v1`'s encoder (#105) | safety step 0.54 → 0.38 s (median) | **no: every variant drops safety hand-offs or officer requests** |
 
 - **Threads.** The default thread count fights over the laptop's mix of performance and efficiency cores. `LAYA_THREADS=8` is set on the decider's own ONNX Runtime session.
 - **int8 is not used, on the base checkpoint or the fine-tuned one.** On the base checkpoint it halves the time, but the model is unsure about Kannada: most of its yes/no answers sit near 0.5, and int8's rounding flips them (largest change 0.83). Per-channel and weights-only variants did not help. The fine-tuned checkpoint was expected to answer confidently enough to survive the rounding, so it was retested on 2026-11-07 (#97). The comparison used 350 transcripts: the 50 seed sentences and 300 training rows, never the held-out test set. Each decision the call acts on was compared with the fp32 model:
@@ -58,7 +59,17 @@ Timed on one long fixture (all eight questions in one run), before the split:
   | Every acted-on decision the same | 153 of 350 | 162 of 350 |
   | Department routed the same | 261 of 350 | 269 of 350 |
 
-  In the same run, plain int8 was about 6× faster: the safety step took 0.20 s against 1.29 s (median), and the whole decision 0.62 s against 4.03 s. Both were timed on battery, so only the ratio holds. Losing 23 safety hand-offs rules it out, whatever the speed, so the live call stays on fp32. A faster safety step now needs a smaller model, or quantization-aware fine-tuning, not post-training int8. Quantizing needs two workarounds in onnxruntime's quantizer: skip its shape re-inference (`onnx_quantizer.save_and_reload_model_with_shape_infer`), and pass `extra_options={"DefaultTensorType": onnx.TensorProto.FLOAT}`.
+  In the same run, plain int8 was about 6× faster: the safety step took 0.20 s against 1.29 s (median), and the whole decision 0.62 s against 4.03 s. Both were timed on battery, so only the ratio holds. Losing 23 safety hand-offs rules it out, whatever the speed, so the live call stays on fp32. A faster safety step now needs a smaller model, or quantization-aware fine-tuning, not post-training int8.
+
+  int8 on only part of the encoder was tested next (#105), on the same 350 transcripts. The rule was fixed before the run: a variant must drop **no** safety hand-off and **no** officer request that fp32 makes. All three failed:
+
+  | int8 on | Safety hand-offs dropped | Officer requests dropped | Every acted-on decision the same |
+  | --- | --- | --- | --- |
+  | The MLP matrices of all 22 layers | 21 | 7 | 176 of 350 |
+  | Layers 0–10, all matrices | 2 | 4 | 275 of 350 |
+  | Layers 0–15, all matrices | 21 | 6 | 162 of 350 |
+
+  The MLP-only variant took the safety step from 0.54 s to 0.38 s (median). The other two were timed while the laptop was busy, so only their decisions count. Even half the encoder in int8 changes a fifth of the decisions, so no further split was tried: picking the one that happens to pass on these 350 transcripts would be fitting to them. Quantizing needs two workarounds in onnxruntime's quantizer: skip its shape re-inference (`onnx_quantizer.save_and_reload_model_with_shape_infer`), and pass `extra_options={"DefaultTensorType": onnx.TensorProto.FLOAT}`.
 - **Shorter inputs do not help.** Padding is not the cost, and capping Laya's `max_len` at 192 cut the question text and broke answers.
 - **Screening only the newest turn does not help either.** Measured 2026-11-05 on `kn-ft-v1` with 50 three-turn calls (a seed sentence, then a landmark, then a ward number). The safety step takes 0.43 s on the whole call and 0.27 s on the newest turn, so it saves about 0.15 s. Of the 31 calls still running after turn 1, the answer changed for urgency in 21 at turn 2 and 15 at turn 3, and for out of scope in 8 and 3. Urgency goes on the ticket, so this is not used. Length is not the main cost on calls like these: the whole decision takes 1.17 s at turn 1 and 1.36 s at turn 3. Slow replies on a call come mostly from a busy laptop.
 
