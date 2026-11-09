@@ -69,15 +69,24 @@ async def call(url: str, origin: str, lines: list[str]) -> None:
     async with websockets.connect(url, origin=origin, max_size=None) as socket:
 
         async def microphone() -> None:
+            nonlocal caller_done_at
             chunk = rate * 2 // 10  # 100 ms of 16-bit mono
             pending = b""
+            words_left = 0  # bytes of the caller's words not sent yet
             while True:
                 if not pending and not talk.empty():
-                    pending = talk.get_nowait() + b"\x00" * int(rate * 2 * TRAILING_SILENCE_S)
+                    words = talk.get_nowait()
+                    words_left = len(words)
+                    pending = words + b"\x00" * int(rate * 2 * TRAILING_SILENCE_S)
                 frame, pending = (
                     (pending[:chunk], pending[chunk:]) if pending else (bytes(chunk), b"")
                 )
                 await socket.send(frame)
+                if 0 < words_left <= len(frame):
+                    # The words end inside this frame, which plays from now in real time:
+                    # timed from when it is sent, so a late start or slow sleeps do not count.
+                    caller_done_at = time.monotonic() + words_left / (rate * 2)
+                words_left = max(0, words_left - len(frame))
                 await asyncio.sleep(0.1)
 
         async def listen() -> None:
@@ -139,7 +148,7 @@ async def call(url: str, origin: str, lines: list[str]) -> None:
             before = replies
             log(f"caller says: {line}")
             talk.put_nowait(pcm)
-            caller_done_at = time.monotonic() + len(pcm) / (rate * 2)
+            caller_done_at = None  # set by the microphone once the words are sent
             waiting_first = waiting_answer = True
             await until(lambda before=before: replies > before, "the agent's answer")
             await until(lambda: ends >= expected_ends, "the agent to finish speaking")

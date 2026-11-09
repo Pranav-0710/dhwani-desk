@@ -347,3 +347,16 @@ def test_every_decision_acted_on_is_kept_with_its_probabilities(ticket_store) ->
     assert kept[0]["answers"] == dataclasses.asdict(screening)
     assert kept[1]["answers"]["department_confidence"] == 0.9
     assert {d["decider_revision"] for d in kept} == {"laya:repo@abc"}
+
+
+def test_a_number_running_on_from_the_place_is_masked_on_the_ticket_too() -> None:
+    # Five digits in the place, five in the next turn: neither turn alone looks like a phone
+    # number, and the decider did not flag one (as the keyword rules may not).
+    place = dataclasses.replace(ROADS, has_location=0.9, contains_personal_id=0.0)
+    desk = CountingDesk()
+    call = Dialogue(load_templates(), ScriptedDecider(place, place), desk)
+    assert call.turn("ಗಾಂಧಿನಗರ ಒಂಬತ್ತು ಎಂಟು ನಾಲ್ಕು ಐದು ಸೊನ್ನೆ").keys == ("ask_ward",)
+    assert call.turn("ಒಂದು ಎರಡು ಮೂರು ನಾಲ್ಕು ಐದು").reason == "ticket"
+
+    (filed,) = desk.filed
+    assert filed.location_text == "ಗಾಂಧಿನಗರ XXXXXXX XXXX XXXXXX XXX XXXXXX"

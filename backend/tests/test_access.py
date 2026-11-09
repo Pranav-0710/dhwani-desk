@@ -406,7 +406,7 @@ def test_a_rejected_console_token_is_not_printed() -> None:
         ("max_console_hellos", 0, "MAX_CONSOLE_HELLOS"),
         ("max_call_minutes_per_day", -1, "cannot be negative"),
         ("max_calls_per_client_per_hour", -1, "cannot be negative"),
-        ("max_officer_lines_queued", -1, "cannot be negative"),
+        ("max_officer_lines_queued", 0, "MAX_OFFICER_LINES_QUEUED"),
         ("min_audio_share", 1.5, "MIN_AUDIO_SHARE"),
         ("ticket_location_retention_days", 0, "TICKET_LOCATION_RETENTION_DAYS"),
     ],

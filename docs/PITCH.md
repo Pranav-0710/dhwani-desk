@@ -34,6 +34,6 @@ The agent says "ಸರಿ" ("okay") about 1.5 s after the caller stops. Every mo
 
 ## Built properly
 
-FastAPI backend, React console, 629 tests in CI, Laya fine-tuned on Kaggle and pinned to a Hugging Face tag, and Docker Compose to run it. Synthetic data only; the demo city, *Nagara Seva, City Corporation of Hosapura*, is fictional.
+FastAPI backend, React console, 635 tests in CI, Laya fine-tuned on Kaggle and pinned to a Hugging Face tag, and Docker Compose to run it. Synthetic data only; the demo city, *Nagara Seva, City Corporation of Hosapura*, is fictional.
 
 **Next:** native-speaker training data, real voices, and a SIP phone line.

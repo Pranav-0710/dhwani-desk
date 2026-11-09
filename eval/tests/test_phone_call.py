@@ -83,3 +83,35 @@ def test_the_playlist_leads_each_clip_with_a_marker_and_ends_with_one() -> None:
     found = [t for t, _ in phone_call.find_markers(track, phone_call.PLAYLIST_RATE)]
     expected = [c["marker_s"] for c in schedule["clips"]] + [schedule["end_marker_s"]]
     assert found == pytest.approx(expected, abs=0.002)
+
+
+def test_a_new_cut_replaces_the_last_and_names_each_clip_s_sentence_version(tmp_path) -> None:
+    import transcribe
+
+    schedule = {"clips": [{"id": "t001", "sha256_16": "v1"}, {"id": "t002", "sha256_16": "v2"}]}
+    phone_call.write_clips({"t001": [0.0] * 80, "t002": [0.0] * 80}, schedule, "cut-a", tmp_path)
+    # The second call lost t002: its clip from the first call must not be scored again.
+    phone_call.write_clips({"t001": [0.0] * 80}, schedule, "cut-b", tmp_path)
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["t001.json", "t001.wav"]
+    assert transcribe.phone_clip("t001", "v1", tmp_path) == (tmp_path / "t001.wav", "cut-b")
+    assert transcribe.phone_clip("t002", "v2", tmp_path) is None
+    # A sentence re-recorded since the call: its clip says another version.
+    assert transcribe.phone_clip("t001", "v9", tmp_path) is None
+
+
+def test_a_phone_transcript_from_another_cut_is_done_again() -> None:
+    import transcribe
+
+    clip = (Path("t001.wav"), "cut-b")
+    old = {"id": "t001", transcribe.PHONE: "x", transcribe.PHONE_CUT: "cut-a"}
+    transcribe.forget_stale_phone(old, clip)
+    assert transcribe.PHONE not in old and transcribe.PHONE_CUT not in old
+
+    lost = {"id": "t001", transcribe.PHONE: "x", transcribe.PHONE_CUT: "cut-a"}
+    transcribe.forget_stale_phone(lost, None)  # the new call did not carry it
+    assert transcribe.PHONE not in lost
+
+    current = {"id": "t001", transcribe.PHONE: "x", transcribe.PHONE_CUT: "cut-b"}
+    transcribe.forget_stale_phone(current, clip)
+    assert current[transcribe.PHONE] == "x"

@@ -177,6 +177,11 @@ export default function Supervisor() {
             type="button"
             className={`sv-alert${isSafety(first) ? ' is-safety' : ''}`}
             onClick={() => {
+              // Already on screen: nothing re-renders, so focus Take over now.
+              if (first.id === shown) {
+                takeOverButton.current?.focus()
+                return
+              }
               goToTakeOver.current = true
               setSelected(first.id)
             }}

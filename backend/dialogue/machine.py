@@ -43,6 +43,7 @@ from decisions.thresholds import (
 )
 from dialogue.decision import Decider, Decision, Screening
 from dialogue.templates import Templates
+from tickets.masking import mask_turns
 from tickets.store import TicketRequest
 
 logger = logging.getLogger("dhwani.dialogue")
@@ -139,8 +140,10 @@ class Dialogue:
     slots: Slots = field(default_factory=Slots)
     # Every caller turn, including those said while an officer had the call.
     turns: list[str] = field(default_factory=list)
-    # The caller turns that gave the location, verbatim: what the field team reads.
-    location_turns: list[str] = field(default_factory=list)
+    # Which caller turns gave the location (indices into `turns`): what the field team reads.
+    _location_at: list[int] = field(default_factory=list)
+    # The highest probability, so far in the call, that the caller said a personal number.
+    _personal_id: float = 0.0
     _unrouted_turns: int = 0
     _location_asks: int = 0
     _ward_asked: bool = False
@@ -154,6 +157,11 @@ class Dialogue:
 
     def greet(self) -> Reply:
         return self._reply(("greeting",))
+
+    @property
+    def location_turns(self) -> list[str]:
+        """The caller turns that gave the location, verbatim."""
+        return [self.turns[i] for i in self._location_at]
 
     @property
     def transcript(self) -> str:
@@ -329,10 +337,12 @@ class Dialogue:
         new_ward = decision.ward not in ("unknown", self.slots.ward)
         # The turns no decision has read yet: the caller's last one, or after a hand-back all
         # that was told to the officer (the place may not be the last thing said).
-        unread = self.turns[self._remembered_turns :] or self.turns[-1:]
+        last = len(self.turns)
+        unread = range(self._remembered_turns, last) or range(max(0, last - 1), last)
         self._remembered_turns = len(self.turns)
+        self._personal_id = max(self._personal_id, decision.contains_personal_id)
         if new_place or new_ward:
-            self.location_turns.extend(unread)
+            self._location_at.extend(i for i in unread if i not in self._location_at)
         if decision.ward != "unknown":
             self.slots.ward = decision.ward
         if decision.ward != "unknown" or decision.has_location > HAS_LOCATION:
@@ -369,6 +379,11 @@ class Dialogue:
     def _file(self, answers: Decision | Screening) -> Ticket:
         """File (or, for a call that has one, update) the call's ticket."""
         repeat = isinstance(answers, Decision) and answers.repeat_complaint > REPEAT_COMPLAINT
+        # Masked with the whole call, as the transcripts are: a number can run on from a place
+        # into the next turn, and the place alone may hold too few digits to look like one.
+        # The safety step does not ask about personal numbers, so mask as if one was said.
+        said_one = answers.contains_personal_id if isinstance(answers, Decision) else 1.0
+        masked = mask_turns(self.turns, max(self._personal_id, said_one))
         request = TicketRequest(
             call_id=self.call_id,
             department=self.slots.department or "unknown",
@@ -377,8 +392,8 @@ class Dialogue:
             repeat_complaint=repeat,
             # Before any place is known, an emergency ticket keeps everything the caller
             # said: it is all the field team has to go on.
-            location_text=" ".join(self.location_turns)
-            or (self.transcript if self._emergency else ""),
+            location_text=" ".join(masked[i] for i in self._location_at)
+            or (" ".join(masked) if self._emergency else ""),
             decision=answers,
             decider_revision=self.decider.revision,
         )

@@ -114,7 +114,7 @@ The agent now says a cached "ಸರಿ." ("okay") as soon as a turn ends, before
 | First agent audio ("ಸರಿ."), on the caller's first turn | 1.51, 1.60, 1.63, 2.03 s |
 | The answer itself (question or ticket read-back) | 3.7 to 6.0 s |
 
-The script's old timer caught "ಸರಿ." on the first turn only; on later turns it timed the answer. "ಸರಿ." is said the moment a turn ends, before anything is decided, so a later turn's should come as fast.
+The script's old timer caught "ಸರಿ." on the first turn only; on later turns it timed the answer. "ಸರಿ." is said the moment a turn ends, before anything is decided, so a later turn's should come as fast. One call on 2026-11-10 with the fixed timer (same lines, `kn-ft-v1`) bears that out: "ಸರಿ." at 1.70 s and 1.15 s after the caller stopped, the answer at 2.37 s and 2.29 s, on the first and second turn.
 
 So first audio is at the 1.5 s target, give or take 0.1 s, and the caller is not left in silence. The answer itself still waits for Laya, which took 2 to 4 s per decision in this run (about 1.1 s in the earlier one; the laptop was busier). What would bring the answer closer:
 

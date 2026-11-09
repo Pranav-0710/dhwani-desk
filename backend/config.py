@@ -138,12 +138,19 @@ class Settings(BaseSettings):
         "max_call_minutes_per_day",
         "max_calls_per_client_per_hour",
         "max_console_hellos_per_client",
-        "max_officer_lines_queued",
     )
     @classmethod
     def _not_negative(cls, value: int) -> int:
         if value < 0:
             raise ValueError("A limit cannot be negative")
+        return value
+
+    @field_validator("max_officer_lines_queued")
+    @classmethod
+    def _officer_lines(cls, value: int) -> int:
+        # Not "0 means no limit" like the daily limits: 0 would refuse every officer line.
+        if value < 1:
+            raise ValueError("MAX_OFFICER_LINES_QUEUED must be at least 1")
         return value
 
     @field_validator("min_audio_share")
