@@ -428,11 +428,16 @@ def test_a_hand_back_does_not_bounce_on_other_rules_the_old_words_trip() -> None
     # the distress already dealt with may hand the call straight back.
     scared = dataclasses.replace(ROADS_IN_W04, safety_hazard=0.9, caller_state="distressed")
     call, _ = dialogue(scared, scared)
-    assert call.turn("ವೈರ್ ಬಿದ್ದಿದೆ, ತುಂಬಾ ಭಯ ಆಗ್ತಿದೆ").keys == ("safety",)
+    handed_off = call.turn("ವೈರ್ ಬಿದ್ದಿದೆ, ತುಂಬಾ ಭಯ ಆಗ್ತಿದೆ")
+    assert handed_off.keys == ("safety",)
     call.hand_back()
     reply = call.rethink()
     assert (reply.keys, reply.reason) == (("read_back_ward", "closing"), "ticket")
-    assert reply.ticket is not None and reply.ticket.urgency == "soon"
+    # The caller hears the number of the ticket filed at the hand-off, and the live wire is
+    # still there for the field team: it stays an emergency.
+    assert handed_off.ticket is not None and reply.ticket is not None
+    assert reply.ticket.number == handed_off.ticket.number
+    assert reply.ticket.urgency == "emergency"
 
 
 @pytest.mark.parametrize(
@@ -452,3 +457,76 @@ def test_what_the_caller_says_after_a_hand_back_can_hand_off_again(
     assert reply.keys == keys
     # Only the words since the hand-back were screened for a hand-off.
     assert "ಈಗ ಇನ್ನೊಂದು ಕಡೆ ಬೆಂಕಿ ಬಿದ್ದಿದೆ" in decider.transcripts
+
+
+def test_a_safety_hand_off_files_an_emergency_ticket_at_once() -> None:
+    # Filed on the safety step, from what is known so far: a caller told to call 112 may hang
+    # up before the rest is decided, and the ticket must not depend on the rest.
+    call, _ = dialogue()
+    call.hear("ಕಂಬದಿಂದ ವೈರ್ ಬಿದ್ದು ಸ್ಪಾರ್ಕ್ ಆಗ್ತಿದೆ")
+    screening = Screening(safety_hazard=0.9, urgency="soon", wants_human=0.1, out_of_scope=0.1)
+    reply = call.screened(screening)
+
+    assert reply is not None and reply.ticket is not None
+    assert (reply.ticket.urgency, reply.ticket.department, reply.ticket.ward) == (
+        "emergency",
+        "unknown",
+        "unknown",
+    )
+    (filed,) = call.desk.filed
+    assert filed.decision == screening
+    # No place is known yet, so the field team gets everything the caller said.
+    assert filed.location_text == "ಕಂಬದಿಂದ ವೈರ್ ಬಿದ್ದು ಸ್ಪಾರ್ಕ್ ಆಗ್ತಿದೆ"
+
+
+def test_the_full_decision_fills_in_the_emergency_ticket() -> None:
+    danger = dataclasses.replace(ROADS_IN_W04, safety_hazard=0.9)
+    call, _ = dialogue(danger)
+    handed_off = call.turn("ಗಾಂಧಿನಗರ ಸ್ಕೂಲ್ ಹತ್ತಿರ ವೈರ್ ಬಿದ್ದಿದೆ")
+
+    assert handed_off.keys == ("safety",) and handed_off.ticket is not None
+    first, filled_in = call.desk.filed
+    assert first.call_id == filled_in.call_id == call.call_id
+    assert (filled_in.department, filled_in.ward, filled_in.urgency) == (
+        "roads",
+        "w04",
+        "emergency",
+    )
+    assert filled_in.decision == danger
+    assert filled_in.location_text == "ಗಾಂಧಿನಗರ ಸ್ಕೂಲ್ ಹತ್ತಿರ ವೈರ್ ಬಿದ್ದಿದೆ"
+
+
+@pytest.mark.parametrize(
+    "decision",
+    [
+        dataclasses.replace(ROADS_IN_W04, safety_hazard=0.9),
+        dataclasses.replace(ROADS_IN_W04, urgency="emergency"),
+    ],
+    ids=["hazard", "emergency"],
+)
+def test_an_emergency_caught_only_by_the_full_decision_files_one_too(decision: Decision) -> None:
+    call = Dialogue(TEMPLATES, ScriptedDecider(), CountingDesk())
+    call.hear("...")
+    reply = call.respond(decision)
+    assert reply.reason == "safety"
+    assert reply.ticket is not None and reply.ticket.urgency == "emergency"
+
+
+def test_a_failed_emergency_ticket_never_stops_the_safety_line() -> None:
+    class BrokenDesk(CountingDesk):
+        def file(self, request) -> str:
+            raise OSError("disk full")
+
+    call = Dialogue(
+        TEMPLATES, ScriptedDecider(dataclasses.replace(ROADS, safety_hazard=0.9)), BrokenDesk()
+    )
+    reply = call.turn("ಕಂಬದಿಂದ ವೈರ್ ಬಿದ್ದು ಸ್ಪಾರ್ಕ್ ಆಗ್ತಿದೆ")
+    assert (reply.keys, reply.reason, reply.ticket) == (("safety",), "safety", None)
+    assert call.state is State.HANDED_OFF
+
+
+def test_only_a_caller_in_danger_gets_a_ticket_on_a_hand_off() -> None:
+    call, _ = dialogue(dataclasses.replace(ROADS, wants_human=0.9))
+    reply = call.turn("ಆಫೀಸರ್ ಜೊತೆ ಮಾತಾಡಬೇಕು")
+    assert (reply.reason, reply.ticket) == ("wants_human", None)
+    assert call.desk.filed == []

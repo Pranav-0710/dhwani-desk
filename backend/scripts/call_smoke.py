@@ -21,6 +21,7 @@ import time
 import websockets
 
 from config import get_settings
+from dialogue.templates import load_templates
 from gnani.timbre import TimbreClient, TimbreConfig
 
 # Road damage with no location, then the location: the agent should ask, then file a ticket.
@@ -31,6 +32,9 @@ DEFAULT_LINES = [
 CALLER_VOICE = "Kavin"  # a different voice from the agent's, so the two are easy to tell apart
 TRAILING_SILENCE_S = 1.5  # after each line, so Prisma's VAD closes the segment
 REPLY_TIMEOUT_S = 30.0
+# The fillers said while a turn is decided ("okay", "one moment"): the caller hears them first,
+# but they are not the answer.
+FILLERS = {load_templates().line(key) for key in ("ack", "hold_on")}
 
 
 async def synthesise(lines: list[str], rate: int) -> list[bytes]:
@@ -57,6 +61,9 @@ async def call(url: str, origin: str, lines: list[str]) -> None:
 
     expected_ends, ends, replies, state, hung_up = 0, 0, 0, "listening", False
     caller_done_at: float | None = None
+    # Timed from the end of each caller line: the first agent audio the caller hears (a filler
+    # or the answer), and the start of the answer itself.
+    waiting_first, waiting_answer = False, False
     talk: asyncio.Queue[bytes] = asyncio.Queue()
 
     async with websockets.connect(url, origin=origin, max_size=None) as socket:
@@ -74,16 +81,18 @@ async def call(url: str, origin: str, lines: list[str]) -> None:
                 await asyncio.sleep(0.1)
 
         async def listen() -> None:
-            nonlocal expected_ends, ends, replies, state, hung_up
-            first_audio_logged = True
+            nonlocal expected_ends, ends, replies, state, hung_up, waiting_first, waiting_answer
+            saying_answer = False  # the line being sent is not a filler
             async for message in socket:
                 if isinstance(message, bytes):
-                    if not first_audio_logged and caller_done_at is not None:
-                        log(
-                            f"first agent audio, {time.monotonic() - caller_done_at:.2f}s "
-                            "after the caller stopped"
-                        )
-                        first_audio_logged = True
+                    if caller_done_at is not None:
+                        after = f"{time.monotonic() - caller_done_at:.2f}s after the caller stopped"
+                        if waiting_first:
+                            log(f"first agent audio, {after}")
+                            waiting_first = False
+                        if waiting_answer and saying_answer:
+                            log(f"the answer starts, {after}")
+                            waiting_answer = False
                     continue
                 event = json.loads(message)
                 kind = event["type"]
@@ -93,7 +102,6 @@ async def call(url: str, origin: str, lines: list[str]) -> None:
                     replies += 1
                     expected_ends += len(event["keys"])
                     state = event["state"]
-                    first_audio_logged = False
                     decision = event["decision"] or {}
                     log(
                         f"dialogue: {event['keys']} → {state}"
@@ -102,9 +110,12 @@ async def call(url: str, origin: str, lines: list[str]) -> None:
                         f"@{decision.get('department_confidence')}"
                     )
                 elif kind == "agent_text":
+                    saying_answer = event["text"] not in FILLERS
                     log(f"agent: {event['text']}")
                 elif kind == "agent_audio_end":
-                    ends += 1
+                    # Only lines of a `dialogue` reply are expected; a filler has none.
+                    if saying_answer:
+                        ends += 1
                 elif kind == "call_ended":
                     hung_up = True
                     log(f"the agent hung up ({event['reason']})")
@@ -129,6 +140,7 @@ async def call(url: str, origin: str, lines: list[str]) -> None:
             log(f"caller says: {line}")
             talk.put_nowait(pcm)
             caller_done_at = time.monotonic() + len(pcm) / (rate * 2)
+            waiting_first = waiting_answer = True
             await until(lambda before=before: replies > before, "the agent's answer")
             await until(lambda: ends >= expected_ends, "the agent to finish speaking")
         if state == "closed":

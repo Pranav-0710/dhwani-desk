@@ -64,7 +64,7 @@ Held-out test set, spoken, Prisma at 16 kHz ([`eval/reports/test-kn-ft-v1-timbre
 | Department macro-F1 drop, 8 kHz + noise | reported | 0.01 | 0.00 | **0.01** |
 
 - Fine-tuning made Laya usable for Kannada: zero-shot it could not route a call (0.13) or spot a hazard (0.00).
-- It misses all three accuracy targets. Safety recall is close (30 of 34 hazards caught), but it over-flags: ordinary drain and pothole complaints are often treated as hazards, so they reach an officer instead of getting a ticket. We prefer that error to a missed emergency, but it costs officer time.
+- It misses all three accuracy targets. Safety recall is close (30 of 34 hazards caught), but it over-flags: ordinary drain and pothole complaints are often treated as hazards, so they reach an officer on an emergency ticket instead of getting a routine one. We prefer that error to a missed emergency, but it costs officer time.
 - "Wants a human" is weak (3 of 7). There are few such rows in the training data, and the hand check found some mislabelled.
 - Phone-line audio costs almost nothing: the 8 kHz noisy line drops macro-F1 by about 0.01.
 - The test audio is synthetic speech, so these numbers measure the line and Prisma, not real callers' voices.

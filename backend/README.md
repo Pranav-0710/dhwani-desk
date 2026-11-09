@@ -95,7 +95,7 @@ What the agent says comes from the state machine in `dialogue/machine.py`. It is
 - ask for what is missing
 - read back the ticket number and close
 
-A safety risk wins over everything. A risk outside the corporation's remit, such as chest pain or a fight, gets "call 112" and an officer, not a redirect.
+A safety risk wins over everything. A risk outside the corporation's remit, such as chest pain or a fight, gets "call 112" and an officer, not a redirect. A safety risk or an emergency also files a ticket marked `emergency` at the moment of the hand-off, written in the same worker thread as the caller's turn, so a caller who hangs up straight after the safety line still leaves one. The full decision fills it in when it arrives. A call has one ticket: if the officer hands it back and the agent closes it, the caller hears that same number and it stays `emergency`.
 
 The lines are in `dialogue/templates/kn.yaml`. Fixed lines are synthesised once per process and replayed from memory (`audio/tts_cache.py`).
 
@@ -112,7 +112,7 @@ Before the lines of each reply, the browser gets a `dialogue` message:
 - `state`: `listening`, `handed_off` or `closed`
 - `reason`: why it was handed off or closed
 - `slots`: department, ward, and whether a location was given
-- `ticket`: when one was filed
+- `ticket`: when one was filed or updated (on a safety hand-off, the emergency ticket)
 - `decision`: every answer behind the reply
 - `screening`: set instead of `decision` when the call was handed off after the safety step. Once the full decision is in, a second `dialogue` message follows with no `keys`, the `decision` and the updated `slots`; nothing more is said.
 
@@ -162,16 +162,18 @@ Every `dialogue` message carries `officer`: whether an officer has taken the cal
 
 ## Tickets (`tickets/`, `/api/tickets`)
 
-When the agent closes a call with a ticket, it is stored in SQLite (`DATABASE_URL`, default `backend/dhwani.db`, ignored by git). It uses Python's built-in `sqlite3`, so there is no extra dependency. The schema is in `tickets/store.py`, and it is a shared contract with the console (#18) and the eval harness (#19).
+When the agent closes a call with a ticket, or hands off a caller in danger, the ticket is stored in SQLite (`DATABASE_URL`, default `backend/dhwani.db`, ignored by git). It uses Python's built-in `sqlite3`, so there is no extra dependency. The schema is in `tickets/store.py`, and it is a shared contract with the console (#18) and the eval harness (#19).
 
 | Field | Meaning |
 | --- | --- |
 | `number` | Ticket number read back to the caller, from 1001 |
-| `department`, `ward`, `urgency` | The routing decision. `ward` is a ward id or `unknown` |
+| `department`, `ward`, `urgency` | The routing decision. `department` and `ward` are `unknown` until known; a caller in danger's ticket has urgency `emergency` |
 | `location_text` | The caller's own words for where the problem is (the turns that gave the place or named the ward), masked; empty after the retention below |
 | `repeat_complaint`, `status` | Repeat flag; `open` until someone closes it |
-| `decision`, `decider_revision` | Every answer behind the ticket with its probability, and which decider made it (`keyword-standin-1`, or `laya:<repo>@<commit>`) |
+| `decision`, `decider_revision` | Every answer behind the ticket with its probability (only the safety step's, until the full decision fills in an emergency ticket), and which decider made it (`keyword-standin-1`, or `laya:<repo>@<commit>`) |
 | `call_id`, `created_at` | Links the ticket to its caller turns; UTC timestamp |
+
+Every decision the agent acts on is also kept on its own, in the `decisions` table, whether the call ends in a ticket, a hand-off or a redirect: the call, how many turns it had read, the step (`screening` for the safety step, `decision` for every question), what the agent did (`outcome`: a hand-off or closing reason, or the line it asked next), every answer with its probability, and the decider revision. It is written in the same worker thread as the reply, so a hang-up cannot lose it. It holds no caller words, so it is kept.
 
 Two rules protect callers:
 - **Masking:** caller turns are stored masked in `transcripts`. Before anything is written, every run of 10 or more digits (phone, Aadhaar, account) is replaced with X. When the decider thinks a personal ID was said, runs of 4 or more digits are masked too.

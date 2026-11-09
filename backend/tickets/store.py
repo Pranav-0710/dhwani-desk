@@ -1,9 +1,11 @@
-"""Tickets and caller transcripts in SQLite.
+"""Tickets, caller transcripts and the agent's decisions in SQLite.
 
-Two tables, kept apart on purpose: `tickets` holds only what a field team needs and stays (its
+Three tables, kept apart on purpose: `tickets` holds only what a field team needs and stays (its
 `location_text`, the caller's own words, is blanked after a longer period), while `transcripts`
 holds what callers said and is deleted after the retention period. Both are masked before they
-are written (tickets/masking.py), so no personal number is ever stored.
+are written (tickets/masking.py), so no personal number is ever stored. `decisions` keeps every
+decision the agent acted on, with its probabilities and the decider's revision, for audit; it
+holds no caller words, so it stays.
 A shared contract: the console (#18) and the eval harness (#19) read these fields.
 """
 
@@ -15,7 +17,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from dialogue.decision import Decision
+from dialogue.decision import Decision, Screening
 from tickets.masking import mask_personal_ids, mask_turns
 
 # Ticket numbers start here, so every number the agent reads back has four digits.
@@ -46,20 +48,38 @@ CREATE TABLE IF NOT EXISTS transcripts (
 );
 CREATE INDEX IF NOT EXISTS transcripts_by_age ON transcripts (created_at);
 CREATE INDEX IF NOT EXISTS transcripts_by_call ON transcripts (call_id, turn);
+CREATE INDEX IF NOT EXISTS tickets_by_call ON tickets (call_id);
+CREATE TABLE IF NOT EXISTS decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    call_id TEXT NOT NULL,
+    -- how many caller turns had been said when the decision was acted on
+    turn INTEGER NOT NULL,
+    -- `screening` (the safety step alone) or `decision` (every question)
+    step TEXT NOT NULL,
+    -- what the agent did: a hand-off or closing reason, or the line it said next
+    outcome TEXT NOT NULL,
+    answers TEXT NOT NULL,
+    decider_revision TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS decisions_by_call ON decisions (call_id, id);
 """
 
 
 @dataclass(frozen=True)
 class TicketRequest:
-    """What the dialogue files when it closes a call with a ticket."""
+    """What the dialogue files when it closes a call with a ticket, or hands off a caller in
+    danger: an emergency ticket, filed on the safety step and filled in by the full decision."""
 
     call_id: str
-    department: str
+    department: str  # a department id, or "unknown"
     ward: str  # a ward id, or "unknown"
     urgency: str
     repeat_complaint: bool
     location_text: str  # the caller's own words for where the problem is, before masking
-    decision: Decision  # every answer behind the ticket, with its probability
+    # Every answer behind the ticket, with its probability: only the safety step's answers
+    # while the full decision is still running.
+    decision: Decision | Screening
     decider_revision: str  # which decider (and checkpoint) made the decision
 
 
@@ -84,27 +104,82 @@ class TicketStore:
         self._db.close()
 
     def file(self, request: TicketRequest) -> str:
-        """Store a ticket and return its number."""
-        personal_id = request.decision.contains_personal_id
-        decision = asdict(request.decision)
+        """Store a call's ticket and return its number. A call has one ticket: filing again
+        for the same call (an emergency ticket filled in by the full decision, or a call closed
+        after a hand-back) updates it and keeps its number, time and status."""
+        values = (
+            request.department,
+            request.ward,
+            request.urgency,
+            int(request.repeat_complaint),
+            mask_personal_ids(request.location_text, _personal_id(request.decision)),
+            json.dumps(asdict(request.decision), ensure_ascii=False),
+            request.decider_revision,
+        )
         with self._lock, self._db:
-            cursor = self._db.execute(
-                "INSERT INTO tickets (created_at, call_id, department, ward, urgency,"
-                " repeat_complaint, location_text, decision, decider_revision)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            row = self._db.execute(
+                "SELECT id FROM tickets WHERE call_id = ?", (request.call_id,)
+            ).fetchone()
+            if row is None:
+                cursor = self._db.execute(
+                    "INSERT INTO tickets (created_at, call_id, department, ward, urgency,"
+                    " repeat_complaint, location_text, decision, decider_revision)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (now().isoformat(timespec="seconds"), request.call_id, *values),
+                )
+                ticket_id = cursor.lastrowid
+            else:
+                ticket_id = row["id"]
+                self._db.execute(
+                    "UPDATE tickets SET department = ?, ward = ?, urgency = ?,"
+                    " repeat_complaint = ?, location_text = ?, decision = ?,"
+                    " decider_revision = ? WHERE id = ?",
+                    (*values, ticket_id),
+                )
+        return str(ticket_id + FIRST_NUMBER - 1)
+
+    def record_decision(
+        self,
+        call_id: str,
+        turn: int,
+        outcome: str,
+        answers: Decision | Screening,
+        decider_revision: str,
+    ) -> None:
+        """Keep one decision the agent acted on, for audit: every answer with its probability."""
+        step = "decision" if isinstance(answers, Decision) else "screening"
+        with self._lock, self._db:
+            self._db.execute(
+                "INSERT INTO decisions (created_at, call_id, turn, step, outcome, answers,"
+                " decider_revision) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     now().isoformat(timespec="seconds"),
-                    request.call_id,
-                    request.department,
-                    request.ward,
-                    request.urgency,
-                    int(request.repeat_complaint),
-                    mask_personal_ids(request.location_text, personal_id),
-                    json.dumps(decision, ensure_ascii=False),
-                    request.decider_revision,
+                    call_id,
+                    turn,
+                    step,
+                    outcome,
+                    json.dumps(asdict(answers), ensure_ascii=False),
+                    decider_revision,
                 ),
             )
-        return str(cursor.lastrowid + FIRST_NUMBER - 1)
+
+    def decisions(self, call_id: str) -> list[dict[str, Any]]:
+        """A call's decisions, oldest first."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM decisions WHERE call_id = ? ORDER BY id", (call_id,)
+            ).fetchall()
+        return [
+            {
+                "created_at": row["created_at"],
+                "turn": row["turn"],
+                "step": row["step"],
+                "outcome": row["outcome"],
+                "answers": json.loads(row["answers"]),
+                "decider_revision": row["decider_revision"],
+            }
+            for row in rows
+        ]
 
     def record_turn(self, call_id: str, turn: int, text: str, personal_id: float) -> None:
         """Store one caller turn, masked, and mask the call's earlier turns again.
@@ -173,6 +248,11 @@ class TicketStore:
                 (cutoff,),
             )
         return cursor.rowcount
+
+
+def _personal_id(answers: Decision | Screening) -> float:
+    # The safety step does not ask about personal numbers: mask as if one was said.
+    return answers.contains_personal_id if isinstance(answers, Decision) else 1.0
 
 
 def _ticket(row: sqlite3.Row) -> dict[str, Any]:
