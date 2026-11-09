@@ -130,10 +130,12 @@ export interface ConsoleState {
   calls: Record<string, LiveCall>
   /** Call ids, newest first. */
   order: string[]
+  /** Calls waiting for an officer, in the order they began waiting (not when they started). */
+  waiting: string[]
   thresholds: Thresholds | null
 }
 
-export const EMPTY: ConsoleState = { calls: {}, order: [], thresholds: null }
+export const EMPTY: ConsoleState = { calls: {}, order: [], waiting: [], thresholds: null }
 
 /** An officer's line as the backend speaks it (Dialogue.officer_says). */
 export function spokenForm(text: string): string {
@@ -170,13 +172,15 @@ function applyEvent(call: LiveCall, event: CallEvent): LiveCall {
         ? { ...call, lines: [...call.lines, { who: 'caller', text: event.text }] }
         : call
     case 'agent_text': {
-      const [next, ...rest] = call.officerQueue
-      const officers = next !== undefined && spokenForm(event.text) === next
-      const who: Speaker = officers ? 'officer' : 'agent'
+      // Lines are said in the order they were sent, but a caller talking over the agent drops
+      // the queued ones unsaid: a match further down the queue means those before it never
+      // will be, so they go too.
+      const at = call.officerQueue.indexOf(spokenForm(event.text))
+      const who: Speaker = at >= 0 ? 'officer' : 'agent'
       return {
         ...call,
         lines: [...call.lines, { who, text: event.text }],
-        officerQueue: officers ? rest : call.officerQueue,
+        officerQueue: at >= 0 ? call.officerQueue.slice(at + 1) : call.officerQueue,
       }
     }
     case 'dialogue':
@@ -198,6 +202,20 @@ function applyEvent(call: LiveCall, event: CallEvent): LiveCall {
 }
 
 export function applyMessage(state: ConsoleState, message: ServerMessage | LocalAction): ConsoleState {
+  return withWaiting(reduce(state, message))
+}
+
+/** Keep `waiting` in the order calls began to wait: calls that stopped waiting leave it, and
+ * calls that just began are added at the end (oldest call first, if several began at once). */
+function withWaiting(state: ConsoleState): ConsoleState {
+  const waits = (id: string) => state.calls[id] !== undefined && needsOfficer(state.calls[id])
+  const still = state.waiting.filter(waits)
+  const began = state.order.filter((id) => waits(id) && !still.includes(id)).reverse()
+  if (began.length === 0 && still.length === state.waiting.length) return state
+  return { ...state, waiting: [...still, ...began] }
+}
+
+function reduce(state: ConsoleState, message: ServerMessage | LocalAction): ConsoleState {
   switch (message.type) {
     case 'officer_said':
     case 'officer_unsaid': {
@@ -214,7 +232,8 @@ export function applyMessage(state: ConsoleState, message: ServerMessage | Local
       const order = [...message.calls]
         .sort((a, b) => b.started_at.localeCompare(a.started_at))
         .map((c) => c.call_id)
-      return { calls, order, thresholds: message.thresholds }
+      // Already waiting when the console joined: how long for is unknown, so by start time.
+      return { calls, order, waiting: [], thresholds: message.thresholds }
     }
     case 'call_started':
       return withCall(state, fromSummary(message, false))
@@ -243,10 +262,9 @@ export function isSafety(call: LiveCall): boolean {
 
 /** Calls waiting for an officer: safety risks first, then the longest-waiting first. */
 export function waitingCalls(state: ConsoleState): LiveCall[] {
-  return state.order
+  return state.waiting
     .map((id) => state.calls[id])
-    .filter(needsOfficer)
-    .reverse()
+    .filter((call) => call !== undefined && needsOfficer(call))
     .sort((a, b) => Number(isSafety(b)) - Number(isSafety(a)))
 }
 

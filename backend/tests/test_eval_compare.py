@@ -140,3 +140,15 @@ def test_the_new_answers_can_come_from_a_second_report(
         compare.main()
     assert finished.value.code == 0
     assert (tmp_path / "switch-stt.md").read_text("utf-8").startswith("# kn-ft-v1 against kn-ft-v1")
+
+
+def test_latency_from_two_separate_runs_is_labelled_as_such() -> None:
+    same = compare.decide(report(), improved())[1]
+    separate = compare.decide(report(), improved(), same_run=False)[1]
+
+    assert [c.name for c in same if c.name.startswith("whole decision")] == [
+        "whole decision p95, s"
+    ] * 2
+    assert [c.name for c in separate if c.name.startswith("whole decision")] == [
+        "whole decision p95, s (two separate runs)"
+    ] * 2

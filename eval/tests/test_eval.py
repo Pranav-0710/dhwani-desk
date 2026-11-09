@@ -177,3 +177,18 @@ def test_the_manifest_pins_the_set_without_its_text() -> None:
     assert manifest["rows"] == 5
     assert all(row["text"] not in text for row in SEED[:5])
     assert sum(manifest["label_counts"]["department"].values()) == 5
+
+
+def test_the_real_call_is_scored_only_when_named() -> None:
+    # The call carries only the clips that got through; by default it must not shrink the
+    # sentences every other condition is scored on.
+    transcripts = {
+        "a": {"id": "a", "sha256_16": "h", "prisma_16k": "x", "prisma_phone_call": "y"},
+        "b": {"id": "b", "sha256_16": "h", "prisma_16k": "z"},
+    }
+
+    default = run.only_conditions(transcripts, run.DEFAULT_CONDITIONS)
+    assert all("prisma_phone_call" not in t for t in default.values())
+    assert default["a"] == {"id": "a", "sha256_16": "h", "prisma_16k": "x"}
+    named = run.only_conditions(transcripts, ["prisma_phone_call"])
+    assert named["a"] == {"id": "a", "sha256_16": "h", "prisma_phone_call": "y"}

@@ -32,7 +32,7 @@ Built for Gnani AI's **Great Indian AI Internship Challenge**.
 | **Phone-line cost** | Department macro-F1 drops by only **0.01** on an 8 kHz noisy line |
 | **First response** | The agent says "ಸರಿ" ("okay") about **1.5 s** after the caller stops |
 | **Cost per decision** | **₹0**: Laya runs on CPU, so only speech goes to the Gnani APIs |
-| **Tests** | **629** backend and console tests run in CI on every pull request, plus 123 for the training code and 17 for the evaluation harness |
+| **Tests** | **635** backend and console tests run in CI on every pull request, plus 123 for the training code and 20 for the evaluation harness |
 
 ## Contents
 

@@ -12,7 +12,9 @@ Guardrails:
 - `safety_hazard` precision falls by at most 0.05: raising every call would otherwise pass.
 - Routed department macro-F1 falls by at most 0.01.
 - Every other question falls by at most 0.05, or one sentence if that is more.
-- Whole-decision p95 latency is at most 20% slower, compared within the one report.
+- Whole-decision p95 latency is at most 20% slower, compared within the one report. With
+  `--new-report` the two p95s come from separate runs, so machine load can decide it: the check
+  still counts, and the report says so.
 
 Gains (at least one):
 - Routed department macro-F1 up by 0.02 or more.
@@ -58,7 +60,9 @@ def _at_least(name: str, condition: str, old: float, new: float, needed: float) 
     return Check(name, condition, old, new, needed, new >= needed - EPSILON)
 
 
-def guardrails(old: dict[str, Any], new: dict[str, Any], condition: str) -> list[Check]:
+def guardrails(
+    old: dict[str, Any], new: dict[str, Any], condition: str, same_run: bool = True
+) -> list[Check]:
     a, b = old[condition], new[condition]
     checks = [
         _at_least(f"{q} recall", condition, a[q]["recall"], b[q]["recall"], a[q]["recall"])
@@ -97,7 +101,7 @@ def guardrails(old: dict[str, Any], new: dict[str, Any], condition: str) -> list
     limit = latency[0] * SLOWER
     checks.append(
         Check(
-            "whole decision p95, s",
+            "whole decision p95, s" + ("" if same_run else " (two separate runs)"),
             condition,
             latency[0],
             latency[1],
@@ -138,12 +142,15 @@ def gains(old: dict[str, Any], new: dict[str, Any]) -> list[Check]:
     ]
 
 
-def decide(old: dict[str, Any], new: dict[str, Any]) -> tuple[bool, list[Check], list[Check]]:
-    """Whether to switch, then every guardrail and every gain behind that answer."""
+def decide(
+    old: dict[str, Any], new: dict[str, Any], same_run: bool = True
+) -> tuple[bool, list[Check], list[Check]]:
+    """Whether to switch, then every guardrail and every gain behind that answer. `same_run`:
+    both come from one report, so their latencies were measured side by side."""
     missing = [c for c in (HEADLINE, NOISY) for r in (old, new) if c not in r]
     if missing:
         raise SystemExit(f"The report has no spoken scores for: {sorted(set(missing))}")
-    guards = guardrails(old, new, HEADLINE) + guardrails(old, new, NOISY)
+    guards = guardrails(old, new, HEADLINE, same_run) + guardrails(old, new, NOISY, same_run)
     won = gains(old, new)
     return all(c.passed for c in guards) and any(c.passed for c in won), guards, won
 
@@ -199,7 +206,9 @@ def main() -> None:
 
     results = json.loads(args.report.read_text("utf-8"))
     new_results = json.loads(args.new_report.read_text("utf-8")) if args.new_report else results
-    switch, guards, won = decide(results[args.old], new_results[args.new])
+    switch, guards, won = decide(
+        results[args.old], new_results[args.new], same_run=args.new_report is None
+    )
     old_label, new_label = args.labels or (args.old, args.new)
     text = render(old_label, new_label, switch, guards, won)
     name = args.name or f"switch-{args.new}"

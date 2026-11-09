@@ -251,3 +251,71 @@ describe('callToShow', () => {
     expect(callsByUrgency(state).map((c) => c.id)).toEqual(['safety', 'waiting', 'officer', 'agent-new', 'agent-old', 'ended'])
   })
 })
+
+describe('review fixes', () => {
+  const at = (id: string, minute: number): ServerMessage => ({
+    ...(started as Extract<ServerMessage, { type: 'call_started' }>),
+    call_id: id,
+    started_at: `2026-10-29T10:0${minute}:00Z`,
+  })
+  const handOff = (id: string, reason = 'safety'): ServerMessage => ({
+    type: 'call_event',
+    call_id: id,
+    event: { ...(dialogue({ state: 'handed_off', reason }) as { event: DialogueEvent }).event },
+  })
+  const say = (id: string, text: string): ServerMessage => ({
+    type: 'call_event',
+    call_id: id,
+    event: { type: 'agent_text', text },
+  })
+
+  it('orders waiting calls by when they were handed off, not when they started', () => {
+    // b started later but was handed off first: its caller has waited longer.
+    const state = run(at('a', 1), at('b', 2), handOff('b'), handOff('a'))
+
+    expect(waitingCalls(state).map((c) => c.id)).toEqual(['b', 'a'])
+    expect(callToShow(state, null)).toBe('b')
+  })
+
+  it('puts a call back at the end of the queue when it waits again after a hand-back', () => {
+    const backToAgent = dialogue({ state: 'listening' })
+    const state = run(
+      at('c1', 1),
+      at('b', 2),
+      handOff('c1'),
+      handOff('b'),
+      backToAgent,
+      handOff('c1'),
+    )
+
+    expect(waitingCalls(state).map((c) => c.id)).toEqual(['b', 'c1'])
+  })
+
+  it("still labels the officer's lines after a queued one was dropped unsaid", () => {
+    const state = run(
+      at('c1', 1),
+      dialogue({ state: 'handed_off', reason: 'taken_over', officer: true }),
+      { type: 'officer_said', call_id: 'c1', text: 'ಒಂದು' },
+      { type: 'officer_said', call_id: 'c1', text: 'ಎರಡು' },
+      // The caller talked over the agent: "ಒಂದು" was dropped, "ಎರಡು" is said.
+      say('c1', 'ಎರಡು'),
+      { type: 'officer_said', call_id: 'c1', text: 'ಮೂರು' },
+      say('c1', 'ಮೂರು'),
+    )
+
+    expect(state.calls.c1.lines.map((l) => l.who)).toEqual(['officer', 'officer'])
+    expect(state.calls.c1.officerQueue).toEqual([])
+  })
+
+  it("keeps an agent line the agent's while the officer's lines wait", () => {
+    const state = run(
+      at('c1', 1),
+      dialogue({ state: 'handed_off', reason: 'taken_over', officer: true }),
+      { type: 'officer_said', call_id: 'c1', text: 'ಒಂದು' },
+      say('c1', 'ಸರಿ.'),
+    )
+
+    expect(state.calls.c1.lines.at(-1)).toEqual({ who: 'agent', text: 'ಸರಿ.' })
+    expect(state.calls.c1.officerQueue).toEqual(['ಒಂದು'])
+  })
+})

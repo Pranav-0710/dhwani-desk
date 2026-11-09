@@ -4,7 +4,9 @@
 clip is led by a short chirp, the marker, so the recording at the other end can be cut back into
 the same clips however the network delays or stretches it. `cut RECORDING` finds the markers in
 the far end's recording, matches them to the playlist, and writes one 8 kHz clip per sentence to
-`out/audio_phone/<id>.wav`, which `transcribe.py --only phone` sends to Prisma.
+`out/audio_phone/<id>.wav`, which `transcribe.py --only phone` sends to Prisma. Each clip has a
+`<id>.json` naming the version of the sentence that was played (record.py's `sha256_16`) and the
+cut it came from; a new cut replaces every clip of the last one.
 
 Usage, from backend/:
     uv run python ../eval/phone_call.py playlist
@@ -15,6 +17,7 @@ only, never the sentences.
 """
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -168,15 +171,22 @@ def decode(path: Path, rate: int) -> Any:
 
 
 def make_playlist() -> None:
-    clips = []
+    clips, versions = [], {}
     for path in sorted(AUDIO.glob("*.wav")):
         samples, rate = read_wav(path)
         if rate != PLAYLIST_RATE:
             raise SystemExit(f"{path.name} is {rate} Hz; the playlist is {PLAYLIST_RATE} Hz")
+        sidecar = path.with_suffix(".json")
+        if not sidecar.exists():
+            raise SystemExit(f"{sidecar} is missing: record {path.stem} again with record.py")
+        versions[path.stem] = json.loads(sidecar.read_text("utf-8"))["sha256_16"]
         clips.append((path.stem, samples))
     if not clips:
         raise SystemExit(f"No recordings in {AUDIO}")
     track, schedule = build_playlist(clips)
+    # Which version of each sentence was played, so a clip is never scored as another version.
+    for entry in schedule["clips"]:
+        entry["sha256_16"] = versions[entry["id"]]
     WORK.mkdir(parents=True, exist_ok=True)
     write_wav(WORK / "playlist.wav", list(track), PLAYLIST_RATE)
     (WORK / "playlist.json").write_text(json.dumps(schedule, indent=1), "utf-8")
@@ -199,9 +209,24 @@ def cut_recording(path: Path) -> None:
             f"Only {share:.0%} of the markers were found: check the recording is the far end of "
             "the call and covers the whole playlist. Nothing was written."
         )
-    for clip_id, samples in result["clips"].items():
-        write_wav(PHONE_AUDIO / f"{clip_id}.wav", list(samples), 8000)
+    if any("sha256_16" not in entry for entry in schedule["clips"]):
+        raise SystemExit("The playlist predates sentence versions: run `playlist` and call again.")
+    cut_id = hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+    write_clips(result["clips"], schedule, cut_id, PHONE_AUDIO)
     print(f"{len(result['clips'])}/{len(schedule['clips'])} clips written to {PHONE_AUDIO}")
+
+
+def write_clips(clips: dict[str, Any], schedule: dict[str, Any], cut_id: str, folder: Path) -> None:
+    """Replace the last cut's clips with this one's, each with the sentence version it carries
+    and the cut it came from: a clip left over from an earlier call is never scored again."""
+    folder.mkdir(parents=True, exist_ok=True)
+    for old in [*folder.glob("*.wav"), *folder.glob("*.json")]:
+        old.unlink()
+    versions = {entry["id"]: entry["sha256_16"] for entry in schedule["clips"]}
+    for clip_id, samples in clips.items():
+        write_wav(folder / f"{clip_id}.wav", list(samples), 8000)
+        sidecar = {"sha256_16": versions[clip_id], "cut": cut_id}
+        (folder / f"{clip_id}.json").write_text(json.dumps(sidecar), "utf-8")
 
 
 def main() -> None:

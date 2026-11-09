@@ -184,6 +184,19 @@ def p95(values: list[float]) -> float:
 # --- running -------------------------------------------------------------------------------
 
 
+# Scored unless --conditions names others: every simulated line. The real call (#100) carries
+# only the clips it got through, so scoring it with them would shrink every condition's set.
+DEFAULT_CONDITIONS = tuple(c for c in CONDITIONS[1:] if c != "prisma_phone_call")
+
+
+def only_conditions(
+    transcripts: dict[str, dict[str, str]], conditions: list[str] | tuple[str, ...]
+) -> dict[str, dict[str, str]]:
+    """The transcripts with only these spoken conditions (and the row's id and version)."""
+    keep = {"id", "sha256_16", *conditions}
+    return {i: {k: v for k, v in t.items() if k in keep} for i, t in transcripts.items()}
+
+
 def inputs(rows: list[dict[str, Any]], transcripts: dict[str, dict[str, str]]) -> dict[str, list]:
     """For each condition, the (row, text) pairs that have that version of the sentence. The
     spoken conditions keep only the sentences both have, so the drop compares like with like."""
@@ -380,7 +393,10 @@ def main() -> None:
         "--conditions",
         nargs="+",
         choices=CONDITIONS[1:],
-        help="score only these spoken conditions; all are scored on the sentences they share",
+        help=(
+            "score only these spoken conditions, on the sentences they share (default: every "
+            "simulated line; the real phone call only when named)"
+        ),
     )
     parser.add_argument("--name", help="report file name (default: the set and today's date)")
     parser.add_argument(
@@ -409,9 +425,7 @@ def main() -> None:
     if bad:
         raise SystemExit(f"Labels that do not fit the schema: {bad}")
     transcripts = {t["id"]: t for t in read_jsonl(args.transcripts)} if args.transcripts else {}
-    if args.conditions:
-        keep = {"id", "sha256_16", *args.conditions}
-        transcripts = {i: {k: v for k, v in t.items() if k in keep} for i, t in transcripts.items()}
+    transcripts = only_conditions(transcripts, args.conditions or DEFAULT_CONDITIONS)
     texts = {r["id"]: r["text"] for r in rows}
     stale = sorted(
         i
