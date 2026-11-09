@@ -10,7 +10,7 @@
 ![React + TypeScript](https://img.shields.io/badge/console-React%20%2B%20TypeScript-3178C6.svg)
 ![No LLM in the call](https://img.shields.io/badge/LLM%20in%20the%20call-none-2a78d6.svg)
 
-[Demo video (LinkedIn)](https://lnkd.in/p/gNMNPkh4) · [Demo video (X)](https://x.com/jey_pranav53258/status/2116888213851963672) · [Write-up](docs/WRITEUP.md) · [Design (PRD)](docs/PRD.md) · [Run it](#run-it)
+[Demo video (LinkedIn)](https://lnkd.in/p/gNMNPkh4) · [Demo video (X)](https://x.com/jey_pranav53258/status/2116888213851963672) · [One-page pitch](docs/PITCH.md) · [Write-up](docs/WRITEUP.md) · [Design (PRD)](docs/PRD.md) · [Run it](#run-it)
 
 </div>
 

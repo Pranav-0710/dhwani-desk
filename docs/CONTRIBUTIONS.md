@@ -72,3 +72,4 @@ From 2026-10-28 Lakshmi Narasimman is away again, and Jey Pranav is doing the re
 | 2026-11-09 | Jey Pranav | #104 | `kn-ft-v3` scored once on the held-out test set and kept out: more officer requests and fewer false hazards, but 27 of 34 hazards caught against 30; reports, README, write-up and training notes updated (#103) |
 | 2026-11-09 | Jey Pranav | #106 | int8 on part of the fine-tuned encoder tested and rejected: MLP-only, layers 0–10 and layers 0–15 each drop safety hand-offs or officer requests on 350 non-test sentences; latency note updated (#105) |
 | 2026-11-09 | Jey Pranav | #108 | README brought up to date: 123 training and 17 evaluation tests, partial int8 in the latency limitation, and the built phone-call kit in the phone-line limitation (#107) |
+| 2026-11-09 | Jey Pranav | #110 | One-page solution pitch for the submission form: problem, solution, what sets it apart, held-out results and the switch rule; linked at the top of the README (#109) |
