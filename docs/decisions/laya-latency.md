@@ -49,6 +49,7 @@ Timed on one long fixture (all eight questions in one run), before the split:
 | ONNX int8 (dynamic quantization) | 2.0–2.7 s | **no: 58 of 80 answers match** |
 | ONNX int8 on `kn-ft-v1`, plain or per-channel (#97) | about 6× faster | **no: drops 23 of the fp32 model's safety hand-offs in 350 transcripts** |
 | ONNX int8 on part of `kn-ft-v1`'s encoder (#105) | safety step 0.54 → 0.38 s (median) | **no: every variant drops safety hand-offs or officer requests** |
+| ONNX int8 on `kn-ft-v1`, rerun with the committed check (#121) | about 2× faster, on mains | **no: drops 19 of 102 safety hand-offs and 2 of 20 officer requests** |
 
 - **Threads.** The default thread count fights over the laptop's mix of performance and efficiency cores. `LAYA_THREADS=8` is set on the decider's own ONNX Runtime session.
 - **int8 is not used, on the base checkpoint or the fine-tuned one.** On the base checkpoint it halves the time, but the model is unsure about Kannada: most of its yes/no answers sit near 0.5, and int8's rounding flips them (largest change 0.83). Per-channel and weights-only variants did not help. The fine-tuned checkpoint was expected to answer confidently enough to survive the rounding, so it was retested on 2026-11-07 (#97). The comparison used 350 transcripts: the 50 seed sentences and 300 training rows, never the held-out test set. Each decision the call acts on was compared with the fp32 model:
@@ -130,6 +131,6 @@ The script's old timer caught "ಸರಿ." on the first turn only; on later turn
 
 So first audio is at the 1.5 s target, give or take 0.1 s, and the caller is not left in silence. The answer itself still waits for Laya, which took 2 to 4 s per decision in this run (about 1.1 s in the earlier one; the laptop was busier). What would bring the answer closer:
 
-- **A faster safety step.** It is most of Laya's time. Post-training int8 is about 6× faster but loses safety hand-offs on both checkpoints ("What was tried"), so this now means quantization-aware fine-tuning or a smaller model.
+- **A faster safety step.** It is most of Laya's time. Post-training int8 is about 2× faster on mains (6× when first timed on battery) but loses safety hand-offs on both checkpoints ("What was tried"), so this now means quantization-aware fine-tuning or a smaller model.
 - **A shorter `TURN_PAUSE_S`.** Saves up to 0.6 s per turn, at the risk of cutting a caller who pauses mid-sentence into two turns. Tune only against real callers.
 - **The slow first transcript.** Check with Gnani whether a new Prisma session needs a moment before speech; the backend could open the session before the greeting finishes.
