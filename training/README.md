@@ -70,6 +70,19 @@ Known gap: the backend asks Laya about everything the caller has said so far, an
 
 `.env.example` runs `kn-ft-v1` (`DECIDER=laya`, `LAYA_CHECKPOINT_REVISION=kn-ft-v1`); a new tag goes there once the eval harness has scored it. Zero-shot against fine-tuned on the held-out test set is measured by the eval harness (`eval/`, #19), not here: Laya's own before/after uses its calibration slice, which comes from the training data.
 
+## Native review of the training sentences (#119)
+
+The sentences and labels were checked against written rules, not by a native Kannada speaker. `native_review.py` makes the native check cheap. It reads training rows only; the held-out test set is never touched.
+
+```bash
+uv run python native_review.py sheet --rows train.jsonl --n 300 --out review.csv
+uv run python native_review.py apply --rows train.jsonl --sheet filled.csv --out reviewed/
+```
+
+`sheet` writes a CSV (opens in Excel or Google Sheets) of `--n` rows spread over the departments, each with its labels in plain words. The reader fills `verdict` per row: `ok`, `fix` (with the corrected sentence in `corrected_text`), `label_wrong` or `drop`, and may leave a `note`. Blank rows stay as they are. `apply` refuses a sheet whose ids are not in the rows, whose `text` was edited, or whose fix is empty, has no Kannada, or changes a number (so ward and ID labels still hold). It writes `train.jsonl` (edited rows marked `reviewed`), `reviewed_out.jsonl` (rows taken out, with the verdict and note) and `review.json` (the share the reader found natural).
+
+A reviewed set is a new dataset version: train on it as `kn-ft-v4` would be, and it replaces `kn-ft-v1` only if it passes the switch rule (`eval/compare.py`) on the held-out test set, like every challenger.
+
 ## Second fine-tune (#67)
 
 `kn-ft-v2` was trained on the dataset tag `v2.0`. `clean_v2.py` builds that set from the generator's 2,837 rows, using the hand-check verdicts in `results/v2-hand-check.json` (row ids only). Its output matches the files on the Hub apart from line endings: the Hub copies have Windows line endings, which JSON readers ignore.
