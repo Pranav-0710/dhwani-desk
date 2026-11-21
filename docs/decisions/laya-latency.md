@@ -70,6 +70,18 @@ Timed on one long fixture (all eight questions in one run), before the split:
   | Layers 0–15, all matrices | 21 | 6 | 162 of 350 |
 
   The MLP-only variant took the safety step from 0.54 s to 0.38 s (median). The other two were timed while the laptop was busy, so only their decisions count. Even half the encoder in int8 changes a fifth of the decisions, so no further split was tried: picking the one that happens to pass on these 350 transcripts would be fitting to them. Quantizing needs two workarounds in onnxruntime's quantizer: skip its shape re-inference (`onnx_quantizer.save_and_reload_model_with_shape_infer`), and pass `extra_options={"DefaultTensorType": onnx.TensorProto.FLOAT}`.
+
+  **The check is now a committed script (#121):** `backend/scripts/int8_check.py`. The scripts behind #97 and #105 were never committed and are lost, so any faster candidate (int8 here, or a quantization-aware fine-tune or smaller model given with `--candidate`) is now judged the same way: the 50 seed sentences and the first 300 training rows of dataset `v1.0`, never the test set, and the state machine's own first reply to each decision. The rule is unchanged: no dropped safety hand-off and no dropped officer request. Rerun on 2026-11-21 on `kn-ft-v1`, on mains power:
+
+  | Plain int8, all matrices | Live fp32 | int8 |
+  | --- | --- | --- |
+  | Safety hand-offs | 102 | drops 19, adds 1 |
+  | Officer requests | 20 | drops 2, adds 2 |
+  | Same first reply | | 277 of 350 |
+  | Same routed department | | 276 of 350 |
+  | Safety step / whole decision, median | 0.41 s / 1.29 s | 0.21 s / 0.64 s |
+
+  The verdict is the same as in #97: it fails. The counts differ (19 dropped hand-offs here, 23 then) because the lost script's 300 training rows are not known and it compared each decision field by field; the rerun uses the first 300 rows and the call's reply, and was not adjusted to match. int8 is about 2x faster on mains, not the 6x measured on battery.
 - **Shorter inputs do not help.** Padding is not the cost, and capping Laya's `max_len` at 192 cut the question text and broke answers.
 - **Screening only the newest turn does not help either.** Measured 2026-11-05 on `kn-ft-v1` with 50 three-turn calls (a seed sentence, then a landmark, then a ward number). The safety step takes 0.43 s on the whole call and 0.27 s on the newest turn, so it saves about 0.15 s. Of the 31 calls still running after turn 1, the answer changed for urgency in 21 at turn 2 and 15 at turn 3, and for out of scope in 8 and 3. Urgency goes on the ticket, so this is not used. Length is not the main cost on calls like these: the whole decision takes 1.17 s at turn 1 and 1.36 s at turn 3. Slow replies on a call come mostly from a busy laptop.
 
