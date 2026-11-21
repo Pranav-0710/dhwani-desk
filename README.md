@@ -32,7 +32,7 @@ Built for Gnani AI's **Great Indian AI Internship Challenge**.
 | **Phone-line cost** | Department macro-F1 drops by only **0.01** on an 8 kHz noisy line |
 | **First response** | The agent says "ಸರಿ" ("okay") about **1.5 s** after the caller stops |
 | **Cost per decision** | **₹0**: Laya runs on CPU, so only speech goes to the Gnani APIs |
-| **Tests** | **635** backend and console tests run in CI on every pull request, plus 123 for the training code and 20 for the evaluation harness |
+| **Tests** | **635** backend and console tests run in CI on every pull request, plus 134 for the training code and 20 for the evaluation harness |
 
 ## Contents
 
@@ -279,7 +279,7 @@ A 10% hand check of the training set found the labels right in 97% of rows, but 
 
 - **Keep the officer-request gain without losing hazards.** Two fine-tunes raised officer requests (to 5 and 4 of 7), and both caught fewer hazards, so neither went live. Adding officer-request rows alone (`kn-ft-v3`) was not enough.
 - **A faster safety step.** We tested int8 on the fine-tuned model: about 6× faster, but it dropped 23 of the live model's safety hand-offs on 350 non-test sentences, so we kept fp32. int8 on only part of the encoder failed the same check ([details](docs/decisions/laya-latency.md#what-was-tried)). Next is quantization-aware fine-tuning or a smaller model.
-- **Labels checked by a non-native reader.** The labels and the test set were checked against written rules, not by a native Kannada speaker.
+- **Labels checked by a non-native reader.** The labels and the test set were checked against written rules, not by a native Kannada speaker. The kit for a native review of the training sentences is built ([`training/native_review.py`](training/native_review.py)): a sheet to mark ok, fix, wrong label or drop, and a merge into a new training set. It is waiting for a reader.
 
 ## Team
 
